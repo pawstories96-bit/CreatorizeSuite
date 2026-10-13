@@ -1,0 +1,79 @@
+{
+  "name": "framecraft-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local AI video production, editing and rendering studio",
+  "author": "Framecraft Studio",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "node server/index.mjs",
+    "build": "node scripts/prepare-player.mjs && tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "test:desktop": "node tests/desktop.mjs",
+    "test:media": "node tests/media.mjs",
+    "test:provider": "node tests/provider.mjs",
+    "package": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "@xyflow/react": "^12.10.0",
+    "adm-zip": "^0.6.1",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "multer": "^2.0.2",
+    "playwright": "^1.64.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sql.js": "^1.13.0",
+    "three": "^0.180.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.180.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.0.12",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0",
+    "vite": "^6.3.0"
+  },
+  "build": {
+    "appId": "studio.framecraft.desktop",
+    "productName": "Framecraft Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/sql.js/dist/**/*",
+      "server/**/*"
+    ],
+    "win": {
+      "icon": "public/icon.ico",
+      "target": "portable",
+    "signExecutable": false
+    },
+    "extraResources": [
+      {
+        "from": "resources/ffmpeg",
+        "to": "ffmpeg"
+      },
+      {
+        "from": "resources/browser",
+        "to": "browser"
+      }
+    ]
+  }
+}

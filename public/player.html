@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #111414;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      #three {
+        position: absolute;
+        inset: 0;
+      }
+      #error {
+        position: absolute;
+        inset: 0;
+        display: none;
+        place-items: center;
+        font: 15px system-ui;
+        color: #deb18c;
+        background: #141818;
+        padding: 30px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas><canvas id="three"></canvas>
+    <div id="error"></div>
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three.module.js" } }
+    </script>
+    <script type="module" src="/player.js"></script>
+  </body>
+</html>

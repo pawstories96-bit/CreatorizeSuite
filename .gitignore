@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+.workspace/
+.test-*/
+test-results/
+*.log
+Creatorize*.png
+.env
+resources/ffmpeg/*.exe
+resources/browser/
+public/three-addons/
