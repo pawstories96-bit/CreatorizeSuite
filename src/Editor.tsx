@@ -77,6 +77,8 @@ export default function Editor({
     [speed, setSpeed] = useState(1),
     [selected, setSelected] = useState<string | null>(null),
     [scope, setScope] = useState("shot"),
+    [range, setRange] = useState<{ start: number; end: number } | null>(null),
+    [comparison, setComparison] = useState<any[]>([]),
     [prompt, setPrompt] = useState(""),
     [tab, setTab] = useState("Chat"),
     [scriptTab, setScriptTab] = useState("Narration"),
@@ -102,6 +104,8 @@ export default function Editor({
     wordsFile = useRef<HTMLInputElement>(null),
     last = useRef(0),
     posRef = useRef(0),
+    rangeAnchor = useRef<number | null>(null),
+    timelineScroll = useRef<HTMLDivElement>(null),
     logs = useRef<HTMLDivElement>(null);
   const duration = p.durationSec || p.shots.at(-1)?.end || 0;
   const shot =
@@ -149,6 +153,18 @@ export default function Editor({
     }
     return r;
   };
+  useEffect(() => {
+    const element = timelineScroll.current;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom((v) =>
+        Math.max(1, Math.min(16, v * (event.deltaY < 0 ? 1.25 : 0.8))),
+      );
+    };
+    element?.addEventListener("wheel", wheel, { passive: false });
+    return () => element?.removeEventListener("wheel", wheel);
+  }, []);
   useEffect(() => {
     const listener = (e: MessageEvent) => {
       if (
@@ -543,8 +559,19 @@ export default function Editor({
           <div className="timeline">
             <div className="timeline-toolbar">
               <span>Timeline</span>
-              <small>Click to seek · Space to play</small>
+              <small>Click to seek · Shift-drag to select shots</small>
               <div className="row">
+                {range && (
+                  <button
+                    title="Clear selected range"
+                    onClick={() => {
+                      setRange(null);
+                      if (scope === "range") setScope("shot");
+                    }}
+                  >
+                    {time(range.start)}–{time(range.end)} <X size={12} />
+                  </button>
+                )}
                 <button
                   title="Review notes"
                   className={notes ? "mint" : ""}
@@ -586,7 +613,7 @@ export default function Editor({
                   </div>
                 ))}
               </div>
-              <div className="timeline-scroll">
+              <div className="timeline-scroll" ref={timelineScroll}>
                 <div
                   className="tracks"
                   style={{ width: `${zoom * 100}%` }}
@@ -594,15 +621,55 @@ export default function Editor({
                     const el = e.currentTarget;
                     el.setPointerCapture(e.pointerId);
                     const r = el.getBoundingClientRect();
-                    seek(((e.clientX - r.left) / r.width) * duration);
+                    const t = Math.max(
+                      0,
+                      Math.min(
+                        duration,
+                        ((e.clientX - r.left) / r.width) * duration,
+                      ),
+                    );
+                    rangeAnchor.current = e.shiftKey ? t : null;
+                    if (e.shiftKey) {
+                      setRange({ start: t, end: t });
+                      setScope("range");
+                    }
+                    seek(t);
                   }}
                   onPointerMove={(e) => {
                     if (e.buttons === 1) {
                       const r = e.currentTarget.getBoundingClientRect();
-                      seek(((e.clientX - r.left) / r.width) * duration);
+                      const t = Math.max(
+                        0,
+                        Math.min(
+                          duration,
+                          ((e.clientX - r.left) / r.width) * duration,
+                        ),
+                      );
+                      if (rangeAnchor.current !== null)
+                        setRange({
+                          start: Math.min(t, rangeAnchor.current),
+                          end: Math.max(t, rangeAnchor.current),
+                        });
+                      seek(t);
                     }
                   }}
+                  onPointerUp={() => {
+                    rangeAnchor.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    rangeAnchor.current = null;
+                  }}
                 >
+                  {range && duration > 0 && (
+                    <div
+                      className="timeline-range"
+                      aria-label="Selected timeline range"
+                      style={{
+                        left: `${(range.start / duration) * 100}%`,
+                        width: `${((range.end - range.start) / duration) * 100}%`,
+                      }}
+                    />
+                  )}
                   <div className="ruler">
                     {Array.from({ length: 9 }, (_, i) => (
                       <span key={i} style={{ left: `${i * 12.5}%` }}>
@@ -869,6 +936,17 @@ export default function Editor({
                             Review changes
                           </Button>
                         )}
+                        {!!current.comparisons?.length && (
+                          <Button
+                            small
+                            onClick={() => {
+                              setComparison(current.comparisons!);
+                              setModal("comparison");
+                            }}
+                          >
+                            Before / After
+                          </Button>
+                        )}
                         {current.output && (
                           <a
                             className="button small"
@@ -885,6 +963,18 @@ export default function Editor({
                 )}
               </div>
               <div className="agent-composer">
+                {scope === "range" && range && (
+                  <small className="range-caption">
+                    Editing{" "}
+                    {
+                      p.shots.filter(
+                        (s) => s.end > range.start && s.start < range.end,
+                      ).length
+                    }{" "}
+                    whole shots overlapping {time(range.start)}–
+                    {time(range.end)}.
+                  </small>
+                )}
                 {shot && (
                   <div className="context-chip">
                     <Clapperboard size={13} />
@@ -915,13 +1005,18 @@ export default function Editor({
                     {[
                       ["selection", "Selection"],
                       ["shot", "Shot"],
+                      ["range", "Range"],
                       ["video", "Video"],
                     ].map(([v, label]) => (
                       <button
                         key={v}
                         className={scope === v ? "selected" : ""}
                         onClick={() => setScope(v)}
-                        disabled={v === "selection" && !selected}
+                        disabled={
+                          (v === "selection" && !selected) ||
+                          (v === "range" &&
+                            (!range || range.end <= range.start))
+                        }
                       >
                         {label}
                       </button>
@@ -930,12 +1025,19 @@ export default function Editor({
                   <button
                     className="send-button"
                     title="Apply edit"
-                    disabled={!prompt.trim() || busy || !shot?.scene}
+                    disabled={
+                      !prompt.trim() ||
+                      busy ||
+                      !shot?.scene ||
+                      (scope === "range" &&
+                        (!range || range.end <= range.start))
+                    }
                     onClick={async () => {
                       const j = await job("edit", {
                         scope,
                         shotId: shot?.id,
                         elementId: selected,
+                        range,
                         prompt,
                       });
                       if (j) setPrompt("");
@@ -996,6 +1098,20 @@ export default function Editor({
                     >
                       View changes
                     </Button>
+                    {jobs.find((j) => j.commit === h.hash)?.comparisons
+                      ?.length ? (
+                      <Button
+                        small
+                        onClick={() => {
+                          setComparison(
+                            jobs.find((j) => j.commit === h.hash)!.comparisons!,
+                          );
+                          setModal("comparison");
+                        }}
+                      >
+                        Before / After
+                      </Button>
+                    ) : null}
                     {history.at(-1)?.hash !== h.hash && (
                       <Button
                         small
@@ -1421,6 +1537,29 @@ export default function Editor({
           </div>
         </Modal>
       )}
+      {modal === "comparison" && (
+        <Modal title="Before / After" wide onClose={() => setModal("")}>
+          <div className="modal-body comparison-list">
+            {comparison.map((item) => (
+              <section key={item.shotId}>
+                <h3>
+                  {item.title || item.shotId} · {time(item.time)}
+                </h3>
+                <div className="comparison-pair">
+                  <figure>
+                    <img src={media(p, item.before)} alt="Before the edit" />
+                    <figcaption>Before</figcaption>
+                  </figure>
+                  <figure>
+                    <img src={media(p, item.after)} alt="After the edit" />
+                    <figcaption>After</figcaption>
+                  </figure>
+                </div>
+              </section>
+            ))}
+          </div>
+        </Modal>
+      )}
       {modal === "shortcuts" && (
         <Modal title="Editor shortcuts" onClose={() => setModal("")}>
           <div className="modal-body shortcut-list">
@@ -1430,6 +1569,8 @@ export default function Editor({
               ["Ctrl + K", "Search / command palette"],
               ["Click preview", "Select an element"],
               ["Drag timeline", "Scrub video"],
+              ["Shift + drag", "Select shots overlapping a time range"],
+              ["Ctrl + scroll", "Zoom timeline"],
               ["Ctrl + Enter", "Create project in new-project dialog"],
             ].map(([key, label]) => (
               <div key={key}>

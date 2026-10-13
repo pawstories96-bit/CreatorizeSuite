@@ -7,8 +7,16 @@ import { validateScene, atomic } from "../server/core.mjs";
 const workspace = path.resolve(".test-desktop-" + Date.now());
 const app = await electron.launch({
   ...(process.env.PACKAGED_EXE
-    ? { executablePath: path.resolve(process.env.PACKAGED_EXE), args: ['--user-data-dir='+path.join(workspace,'electron-profile')] }
-    : { args: [".",'--user-data-dir='+path.join(workspace,'electron-profile')] }),
+    ? {
+        executablePath: path.resolve(process.env.PACKAGED_EXE),
+        args: ["--user-data-dir=" + path.join(workspace, "electron-profile")],
+      }
+    : {
+        args: [
+          ".",
+          "--user-data-dir=" + path.join(workspace, "electron-profile"),
+        ],
+      }),
   env: {
     ...process.env,
     FRAMECRAFT_WORKSPACE: workspace,
@@ -79,7 +87,7 @@ try {
       return j;
     };
     const wait = async (job) => {
-      for (let i = 0; i < 180; i++) {
+      for (let i = 0; i < (process.env.LIVE_PACKAGED_MCP ? 900 : 180); i++) {
         const state = await call("/state"),
           j = state.jobs.find((j) => j.id === job.id);
         if (j.status === "done") return j;
@@ -134,6 +142,30 @@ try {
     );
     assert.ok(render.size > 1000);
     console.log("PASS: packaged Chromium and FFmpeg produce a real MP4");
+    if (process.env.LIVE_PACKAGED_MCP === "1") {
+      const edit = await wait(
+        await call(`/projects/${p.id}/jobs`, {
+          action: "edit",
+          options: {
+            scope: "shot",
+            shotId: "s001",
+            agent: { provider: "codex", effort: "low" },
+            prompt:
+              "Change the circle fill to blue #4488ee. Keep everything else exactly the same. Call Framecraft get_project and render_frames with the candidate scene at shot-relative time 0.5, and check_preview, then return the complete scene JSON.",
+          },
+        }),
+      );
+      assert.ok(
+        edit.events.some((e) => e.text === "Agent tool: render_frames"),
+      );
+      assert.ok(
+        edit.events.some((e) => e.text === "Agent tool: check_preview"),
+      );
+      assert.equal(edit.comparisons.length, 1);
+      console.log(
+        "PASS: packaged signed-in Codex uses bundled MCP bridge, real preview tools, and before/after captures",
+      );
+    }
     const voice = await call("/projects", {
       title: "Internal packaged voice check",
       script: "The packaged speech engine is working.",

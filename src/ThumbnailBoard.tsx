@@ -258,6 +258,7 @@ export function ThumbnailBoard({
           nodeTypes={nodeTypes}
           colorMode="dark"
           fitView
+          fitViewOptions={{ maxZoom: 1 }}
           minZoom={0.15}
           maxZoom={2}
           deleteKeyCode={["Backspace", "Delete"]}

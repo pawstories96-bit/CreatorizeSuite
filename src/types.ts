@@ -51,6 +51,13 @@ export type Job = {
   events: { type: string; text: string; at: string }[];
   error?: string;
   commit?: string;
+  comparisons?: {
+    shotId: string;
+    title: string;
+    time: number;
+    before: string;
+    after: string;
+  }[];
   output?: string;
   usage?: any;
   size?: number;

@@ -21,7 +21,7 @@ The desktop workspace lives in `Documents/Framecraft Workspace`. `FRAMECRAFT_WOR
 1. In Connections, choose Codex and test the connection. The official Codex CLI must already be installed and signed in. Model names default to the CLI's own choice.
 2. Create a project with a topic or paste your script. Review research and narration before generating speech.
 3. Generate a Windows voiceover or import a recording. Windows speech is free and local. Imported recordings use local Whisper timing.
-4. Build the video. Review shots while the build continues; use the chat panel for a shot/object/video edit. Higher review tiers run additional checks.
+4. Build the video. Review shots while the build continues; use the chat panel for a shot/object/video edit. Shift-drag the timeline to edit all shots overlapping a range. Completed edits include actual Before / After frames in the result card and History. Higher review tiers run additional checks.
 5. Import images, MP4s, GLBs or audio in Assets as needed. Use an audio file as a ducked bed beneath narration.
 6. Export the MP4 and SRT. Optional YouTube publishing requires your own Google OAuth setup and explicit upload review.
 
@@ -40,6 +40,8 @@ npm test
 npm run test:e2e
 npm run test:media
 npm run test:desktop
+node tests/agent-tools.mjs
+node tests/editing.mjs
 npm run package
 $env:PACKAGED_EXE='release/win-unpacked/Framecraft Studio.exe'
 node tests/desktop.mjs
@@ -55,6 +57,8 @@ Live provider tests consume the selected provider's usage allowance. Core tests 
 - `public/player.js`: deterministic scene runtime shared by preview, QA and rendering.
 - `server/core.mjs`: schema, persistence, project files and Git.
 - `server/agents.mjs`: official CLI / compatible API adapters and credential vault.
+- `server/agent-tools.mjs` and `server/mcp-bridge.mjs`: job-scoped MCP tools for project/word/storyboard/asset reads, candidate PNG rendering, preview checks and layout measurement. Compatible API/local providers use the same tools through a bounded function-calling loop. CLI configuration is per invocation; global provider settings are not modified.
+- `server/scene-watch.mjs`: validates changes to `scenes/<shotId>.json`, reloads the preview and commits accepted changes. Invalid edits keep the last valid preview and show a failed reload job. Generated `.js` mirrors are not the editable source.
 - `server/pipeline.mjs`: durable jobs, audio, generation, QA, rendering and routines.
 - `server/integrations.mjs`: configured image and Google APIs.
 - `server/youtube-upload.mjs`: persisted upload sessions and interrupted-transfer recovery.

@@ -15,6 +15,10 @@ Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded bu
 - Word-timed storyboard, per-shot declarative source, deterministic Canvas2D / Three.js rendering, live preview, waveform, playback, seeking, speed, loop, timeline zoom and object selection.
 - Local images, MP4 video and embedded GLB models with deterministic animation. Forward/backward frame hash test passed. Imported assets have attribution records.
 - Real AI shot generation, scoped edits, Git history and reversible changes. Live Codex scene, edit and MP4 export test passed.
+- Job-scoped MCP bridge for official CLIs: project/storyboard/word/asset reads, candidate frame images, programmatic preview checks and layout measurement. Live Codex invoked the bridge, understood the returned PNG and completed a real scene build/edit/export. Compatible API/local models have a bounded function-calling loop over the same tools; protocol tests passed with actual rendered PNGs and cumulative token accounting. Live external API/local models remain unverified.
+- Shift-drag time-range selection applies edits to the whole shots overlapping that range. Object selection edits enforce preservation of other elements and scene settings. Actual before/after PNGs appear in the result and Git History. Browser tests exercised the complete edit flow.
+- External edits to canonical scene JSON are validated, checked in the renderer, hot-reloaded into the live player and committed. Invalid edits preserve the last valid preview. Actual file-edit/reload tests passed.
+- Layout measurements report rotated 2D/text bounds, off-screen objects and candidate text overlaps. Long unbroken labels are measured against available width. Path bounds and 3D occlusion remain outside these checks.
 - Programmatic blank-frame and text-fit checks. Codex visual review of rendered start/middle/end images, with repair loops. Live scene generation and image-understanding calibration passed. Compatible vision APIs can receive image inputs, but have not been live-tested.
 - Real MP4 rendering with Chromium frame stepping and FFmpeg, captions in SRT, 720p/1080p/4K and vertical export options. Automated export tests currently exercise small/720p outputs, not long 4K renders.
 - Procedural ambience or imported music/ambience, looping, automatic narration ducking, loudness normalization. Actual imported audio mix test passed.
@@ -37,14 +41,15 @@ Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded bu
 ## Packaging verification
 
 - Windows portable build produced an executable, but the first packaged export test failed because electron-builder excluded Three.js modules under its dependency's `examples` directory.
-- The build now explicitly copies the required GLTF/Skeleton/geometry modules and their license into public runtime files. The latest unpacked Windows executable passed actual MP4 rendering through bundled Chromium/FFmpeg and real Windows TTS/audio processing, as well as empty startup and provider detection. The portable executable is being generated from this exact verified directory.
+- The build explicitly copies the required GLTF/Skeleton/geometry modules and their license into public runtime files. The latest unpacked Windows executable passed actual MP4 rendering through bundled Chromium/FFmpeg and real Windows TTS/audio processing, as well as empty startup and provider detection.
+- The packaged executable also passed a live signed-in Codex edit through the bundled MCP subprocess: candidate PNG rendering, preview checks and saved before/after captures. This verifies the actual Electron-as-Node bridge and packaged paths, not just the development server.
 - Repeated Git revert/undo and a real ZIP export/import round trip now pass. A timestamp rewrite after reverting had dirtied project.json; the index now loads the committed snapshot without rewriting it.
 
 ## Remaining brief requirements
 
-- Broad provider/tool calibration, reliable Tier C adaptation, per-role fallback chains, separate vision QA for Claude and an app-provided MCP tool server.
+- Broad provider/tool calibration, reliable Tier C adaptation, per-role fallback chains and separate vision QA for Claude. The MCP bridge currently exposes seven read/preview tools; asset fetching, sound-design mutation, storyboard mutation and research tools from the full tool catalog remain to be added.
 - Rich style-specific character/rig kits, advanced 3D camera/lighting/collision/occlusion checks, real maps, automatic real-footage sourcing and style training from reference videos. The current renderer uses validated declarative scenes, not unrestricted arbitrary scene code.
-- Full edit range selection, before/after comparison, editable cue/card/ambience timelines, file-watch hot reload and an all-project cost dashboard with per-model pricing.
+- Editable cue/card/ambience timelines and an all-project cost dashboard with per-model pricing. Range editing currently changes whole intersecting shots, and before/after comparisons use still frames rather than clips.
 - Fish Audio, Piper/Kokoro and ComfyUI-specific adapters; additional validated speech languages. Windows voice coverage depends on installed OS voices.
 - Thumbnail style-key analysis, multiple candidates and regeneration history.
 - Routine upload nodes, multi-topic fan-out, channel catalog scraping, and per-routine cost/run limits. Current topic discovery uses the selected research provider's web tools and creates one topic per run.
@@ -69,5 +74,11 @@ Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded bu
 `node tests/full-workflow.mjs` — live topic-to-video routine through independent visual review, metadata, trailer and approval.
 
 `node tests/project-history.mjs` — repeated undo, ZIP round trip and real Commons download.
+
+`node tests/agent-tools.mjs` — actual stdio MCP, candidate images, layout, session isolation and compatible API tool-loop protocol. Set `LIVE_MCP=1` to also exercise signed-in Codex.
+
+`node tests/editing.mjs` — enforced object boundaries, browser range selection, actual before/after captures and source-file hot reload.
+
+`LIVE_PACKAGED_MCP=1` with `PACKAGED_EXE` set extends the desktop test with a live Codex MCP edit in the packaged application.
 
 Tests create isolated `.test-*` workspaces. They never populate the user's Documents workspace. Machine-specific evidence is in `test-results/` and is excluded from Git.

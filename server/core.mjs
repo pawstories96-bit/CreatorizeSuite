@@ -147,7 +147,7 @@ export function storyboardFromWords(words) {
   }));
 }
 const element = z.object({
-  id: z.string(),
+  id: z.string().min(1).max(128),
   type: z.enum([
     "rect",
     "circle",
@@ -195,6 +195,8 @@ export const sceneSchema = z.object({
 });
 export function validateScene(scene) {
   const result = sceneSchema.parse(scene);
+  if (new Set(result.elements.map((e) => e.id)).size !== result.elements.length)
+    throw Error("Scene element IDs must be unique");
   for (const e of result.elements) {
     if (
       ["image", "video", "model"].includes(e.type) &&

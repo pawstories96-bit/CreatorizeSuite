@@ -28,6 +28,7 @@ export class Pipeline {
     this.agents = agents;
     this.vault = vault;
     this.active = new Map();
+    this.externalLocks = new Set();
     this.base = "";
     this.browser = null;
     this.pumping = false;
@@ -129,6 +130,7 @@ export class Pipeline {
         .all("jobs")
         .filter((j) => j.status === "queued" && !j.parentId)) {
         if (this.active.size >= limit) break;
+        if (this.externalLocks.has(j.projectId)) continue;
         if (
           [...this.active.values()].some(
             (a) => a.projectId && a.projectId === j.projectId,
@@ -600,29 +602,117 @@ export class Pipeline {
       );
       return;
     }
+    if (job.action === "reload") {
+      const candidate = structuredClone(p);
+      const targets = candidate.shots.filter((s) =>
+        job.options.shotIds.includes(s.id),
+      );
+      if (!targets.length) return;
+      for (const s of targets) {
+        const file = path.join(dir, "scenes", s.id + ".json");
+        if (fs.statSync(file).size > 2_000_000)
+          throw Error("Scene source exceeds 2 MB");
+        try {
+          s.scene = validateScene(JSON.parse(fs.readFileSync(file, "utf8")));
+        } catch (e) {
+          throw Error(
+            `${s.id}.json: ${e.message}. The last valid preview is preserved.`,
+          );
+        }
+      }
+      const qa = await this.verify(candidate, targets);
+      if (qa.issues.length)
+        throw Error(
+          qa.issues.join("; ") + ". The last valid preview is preserved.",
+        );
+      for (const s of targets) {
+        const target = p.shots.find((shot) => shot.id === s.id);
+        target.scene = s.scene;
+        target.qa = qa;
+        target.status = "built";
+        atomic(path.join(dir, "scenes", s.id + ".json"), s.scene);
+        atomic(
+          path.join(dir, "scenes", s.id + ".js"),
+          `export default ${JSON.stringify(s.scene, null, 2)};\n`,
+        );
+      }
+      save();
+      job.commit = await this.store.commit(p.id, "Reload edited scene source");
+      emit(
+        "success",
+        `Reloaded ${targets.length} edited scene files. Preview checks passed.`,
+      );
+      return;
+    }
     if (job.action === "edit" || job.action === "ultra") {
       if (!p.shots.some((s) => s.scene))
         throw Error("Build scenes before editing");
+      const range = job.options.range;
+      if (
+        job.options.scope === "range" &&
+        (!range ||
+          !Number.isFinite(range.start) ||
+          !Number.isFinite(range.end) ||
+          range.start < 0 ||
+          range.end <= range.start ||
+          range.end > p.durationSec)
+      )
+        throw Error("Select a valid timeline range first");
       const targets =
         job.options.scope === "video"
           ? p.shots
-          : p.shots.filter((s) => s.id === job.options.shotId);
+          : job.options.scope === "range"
+            ? p.shots.filter((s) => s.end > range.start && s.start < range.end)
+            : p.shots.filter((s) => s.id === job.options.shotId);
       if (!targets.length) throw Error("Select a shot first");
+      if (targets.some((s) => !s.scene))
+        throw Error("Build all selected shots before editing");
+      if (
+        job.options.scope === "selection" &&
+        !targets[0].scene.elements.some((e) => e.id === job.options.elementId)
+      )
+        throw Error("Select an existing scene element first");
       job.before = await this.store.commit(p.id, "Checkpoint before edit");
+      job.comparisons = [];
       for (let i = 0; i < targets.length; i++) {
         const s = targets[i];
         this.update(job, 5 + (85 * i) / targets.length, `Editing ${s.title}`);
         const original = s.scene;
         try {
+          const before = await this.comparisonFrame(p, s, job, "before");
           const edited = await generate(
             `${guide}\nEdit scene for narration ${s.narration}. Duration ${s.end - s.start}. Existing scene: ${JSON.stringify(s.scene)}. Request: ${job.options.prompt || "Improve the composition, lighting and visual detail. Fix any visible defects."}. Scope: ${job.options.scope}. Selected element ID: ${job.options.elementId || "all"}. Preserve other objects when scope is selection; preserve shot timing. Return the complete scene JSON.`,
             job.action === "ultra" ? "ultra" : "edit",
           );
           s.scene = validateScene(edited);
+          if (job.options.scope === "selection") {
+            const replacement = s.scene.elements.find(
+              (e) => e.id === job.options.elementId,
+            );
+            s.scene = validateScene({
+              ...original,
+              elements: original.elements.flatMap((e) =>
+                e.id === job.options.elementId
+                  ? replacement
+                    ? [replacement]
+                    : []
+                  : [e],
+              ),
+            });
+          }
           save();
           const qa = await this.verify(p, [s]);
           if (qa.issues.length) throw Error(qa.issues.join("; "));
           s.qa = qa;
+          const after = await this.comparisonFrame(p, s, job, "after");
+          job.comparisons.push({
+            shotId: s.id,
+            title: s.title,
+            time: (s.start + s.end) / 2,
+            before,
+            after,
+          });
+          this.persist(job);
           atomic(path.join(dir, "scenes", s.id + ".json"), s.scene);
           atomic(
             path.join(dir, "scenes", s.id + ".js"),
@@ -851,6 +941,31 @@ export class Pipeline {
     p.durationSec = await this.duration(output);
     p.pipeline.audioCleaned = "done";
     this.store.saveProject(p);
+  }
+  async comparisonFrame(p, shot, job, side) {
+    const width = p.format === "9:16" ? 540 : 960;
+    const height = p.format === "9:16" ? 960 : 540;
+    const browser = await this.browserInstance();
+    const page = await browser.newPage({ viewport: { width, height } });
+    try {
+      await page.goto(
+        `${this.base}/player.html?width=${width}&height=${height}`,
+      );
+      await page.waitForFunction(() => window.ready);
+      await page.evaluate((project) => window.FC.setProject(project), p);
+      await page.evaluate(
+        (t) => window.FC.renderFrame(t),
+        (shot.start + shot.end) / 2,
+      );
+      const relative = `exports/reviews/${job.id}/${shot.id}-${side}.png`;
+      atomic(
+        path.join(this.store.projectDir(p.id), relative),
+        await page.screenshot(),
+      );
+      return relative;
+    } finally {
+      await page.close();
+    }
   }
   async verify(p, shots) {
     const browser = await this.browserInstance();

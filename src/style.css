@@ -3244,3 +3244,41 @@ input[type="range"] {
 .audience-evidence {
   margin: 24px 0;
 }
+.timeline-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #b9e0ca22;
+  border-left: 2px solid #b9e0ca;
+  border-right: 2px solid #b9e0ca;
+  pointer-events: none;
+  z-index: 4;
+}
+.range-caption {
+  display: block;
+  padding: 7px 4px;
+  color: #b9e0ca;
+}
+.comparison-list {
+  max-height: 75vh;
+  overflow: auto;
+}
+.comparison-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.comparison-pair figure {
+  margin: 0;
+}
+.comparison-pair img {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  background: #111;
+}
+.comparison-pair figcaption {
+  text-align: center;
+  padding: 8px;
+  color: #b9c6bf;
+}

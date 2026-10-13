@@ -23,6 +23,8 @@ import { AgentRunner, Vault } from "./agents.mjs";
 import { Pipeline } from "./pipeline.mjs";
 import { integrations } from "./integrations.mjs";
 import { assetRoutes } from "./assets.mjs";
+import { AgentTools } from "./agent-tools.mjs";
+import { watchScenes } from "./scene-watch.mjs";
 const appRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -37,6 +39,8 @@ export async function startServer(options = {}) {
   if (options.safeStorage) vault.safeStorage = options.safeStorage;
   const agents = new AgentRunner(store, vault),
     pipeline = new Pipeline(store, agents, vault);
+  const agentTools = new AgentTools(store, pipeline);
+  agents.toolBridge = agentTools;
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "25mb" }));
@@ -68,6 +72,10 @@ export async function startServer(options = {}) {
         next(e);
       }
     });
+  route("post", "/api/agent-tools", async (req, res) => {
+    const token = req.headers.authorization?.replace(/^Bearer /, "");
+    res.json(await agentTools.call(token, req.body.name, req.body.arguments));
+  });
   route("get", "/api/state", async (req, res) =>
     res.json({
       projects: store
@@ -380,32 +388,40 @@ export async function startServer(options = {}) {
       throw Error("Stop the active job before reverting");
     const hash = req.body.hash;
     if (!/^[a-f0-9]{40}$/.test(hash)) throw Error("Invalid commit");
-    const cwd = store.projectDir(req.params.id);
-    const dirty = await run(
-      "git",
-      ["status", "--porcelain", "--untracked-files=no"],
-      { cwd },
-    );
-    if (dirty.stdout.trim())
-      await store.commit(
-        req.params.id,
-        "Save current project state before revert",
-      );
+    if (pipeline.externalLocks.has(req.params.id))
+      throw Error("Project history is already being updated");
+    pipeline.externalLocks.add(req.params.id);
     try {
-      await run("git", ["revert", "--no-edit", hash], { cwd });
-    } catch (e) {
-      await run("git", ["revert", "--abort"], { cwd }).catch(() => {});
-      throw Error(
-        "This change conflicts with newer edits. No files were reverted. " +
-          e.message,
+      const cwd = store.projectDir(req.params.id);
+      const dirty = await run(
+        "git",
+        ["status", "--porcelain", "--untracked-files=no"],
+        { cwd },
       );
+      if (dirty.stdout.trim())
+        await store.commit(
+          req.params.id,
+          "Save current project state before revert",
+        );
+      try {
+        await run("git", ["revert", "--no-edit", hash], { cwd });
+      } catch (e) {
+        await run("git", ["revert", "--abort"], { cwd }).catch(() => {});
+        throw Error(
+          "This change conflicts with newer edits. No files were reverted. " +
+            e.message,
+        );
+      }
+      const p = read(path.join(cwd, "project.json"));
+      if (!p) throw Error("Project snapshot is missing");
+      // Keep the restored file exactly equal to the Git commit. Rewriting its
+      // timestamp here would immediately dirty it and break undoing this revert.
+      store.put("projects", p);
+      res.json(p);
+    } finally {
+      pipeline.externalLocks.delete(req.params.id);
+      pipeline.pump();
     }
-    const p = read(path.join(cwd, "project.json"));
-    if (!p) throw Error("Project snapshot is missing");
-    // Keep the restored file exactly equal to the Git commit. Rewriting its
-    // timestamp here would immediately dirty it and break undoing this revert.
-    store.put("projects", p);
-    res.json(p);
   });
   route("post", "/api/settings", async (req, res) => {
     const previous = store.settings();
@@ -651,6 +667,7 @@ export async function startServer(options = {}) {
   base = `http://127.0.0.1:${server.address().port}`;
   pipeline.base = base;
   pipeline.recover();
+  const sceneWatcher = watchScenes(store, pipeline);
   const timer = setInterval(() => {
     for (const j of store.all("jobs"))
       if (j.status === "paused" && j.nextRetryAt && j.nextRetryAt <= Date.now())
@@ -673,9 +690,12 @@ export async function startServer(options = {}) {
     store,
     pipeline,
     vault,
+    agentTools,
+    sceneWatcher,
     url: base,
     close: async () => {
       clearInterval(timer);
+      sceneWatcher.close();
       integrationsRuntime.close();
       pipeline.suspended = true;
       for (const j of pipeline.active.values()) {

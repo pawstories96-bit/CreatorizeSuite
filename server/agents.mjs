@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { run, uid, atomic } from "./core.mjs";
+import { agentTools } from "./agent-tools.mjs";
 
 export function extractJSON(text) {
   const clean = text
@@ -133,50 +134,170 @@ export class AgentRunner {
         throw Error("Add your API key in Connections");
       const controller = new AbortController();
       job.abort = () => controller.abort();
-      const response = await fetch(url + "/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(key ? { Authorization: `Bearer ${key}` } : {}),
+      const bridge = ["build", "edit", "ultra"].includes(role)
+        ? this.toolBridge?.register(job, emit)
+        : null;
+      const messages = [
+        {
+          role: "system",
+          content:
+            "Return the requested JSON only. Follow the supplied schema and constraints.",
         },
-        body: JSON.stringify({
-          model: route.model || (provider === "local" ? s.localModel : s.model),
-          messages: [
-            {
-              role: "system",
-              content:
-                "Return the requested JSON only. Follow the supplied schema and constraints.",
+        {
+          role: "user",
+          content: images?.length
+            ? [
+                { type: "text", text: prompt },
+                ...images.map((file) => ({
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/png;base64,${fs.readFileSync(file).toString("base64")}`,
+                  },
+                })),
+              ]
+            : prompt,
+        },
+      ];
+      if (bridge)
+        messages[0].content +=
+          " Use the available Framecraft tools to inspect candidate scenes before returning final JSON. Preview tools do not save changes. For models without image support, use measure_layout and check_preview instead of render_frames.";
+      let toolsEnabled = Boolean(bridge);
+      try {
+        for (let round = 0; round < 12; round++) {
+          const response = await fetch(url + "/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(key ? { Authorization: `Bearer ${key}` } : {}),
             },
-            {
-              role: "user",
-              content: images?.length
-                ? [
-                    { type: "text", text: prompt },
-                    ...images.map((file) => ({
-                      type: "image_url",
-                      image_url: {
-                        url: `data:image/png;base64,${fs.readFileSync(file).toString("base64")}`,
+            body: JSON.stringify({
+              model:
+                route.model || (provider === "local" ? s.localModel : s.model),
+              messages,
+              stream: false,
+              ...(toolsEnabled
+                ? {
+                    tools: agentTools.map((tool) => ({
+                      type: "function",
+                      function: {
+                        name: tool.name,
+                        description: tool.description,
+                        parameters: tool.inputSchema,
                       },
                     })),
-                  ]
-                : prompt,
-            },
-          ],
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        if (response.status === 429) job.limitHit = true;
-        throw Error(
-          `Provider ${response.status}: ${(await response.text()).slice(0, 500)}`,
-        );
+                  }
+                : {}),
+            }),
+            signal: AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(600_000),
+            ]),
+          });
+          if (!response.ok) {
+            const detail = (await response.text()).slice(0, 500);
+            if (
+              toolsEnabled &&
+              round === 0 &&
+              [400, 422].includes(response.status) &&
+              /tool|function.call/i.test(detail) &&
+              /not.support|unsupported|not.allowed/i.test(detail)
+            ) {
+              toolsEnabled = false;
+              emit(
+                "info",
+                "This model does not support tools. Continuing with JSON generation; the app will validate the returned scene.",
+              );
+              continue;
+            }
+            if (response.status === 429) job.limitHit = true;
+            throw Error(`Provider ${response.status}: ${detail}`);
+          }
+          const data = await response.json();
+          const usage = data.usage || {};
+          job.usage.input_tokens =
+            (job.usage.input_tokens || 0) +
+            (usage.input_tokens || usage.prompt_tokens || 0);
+          job.usage.output_tokens =
+            (job.usage.output_tokens || 0) +
+            (usage.output_tokens || usage.completion_tokens || 0);
+          job.usage.cached_input_tokens =
+            (job.usage.cached_input_tokens || 0) +
+            (usage.cached_input_tokens ||
+              usage.prompt_tokens_details?.cached_tokens ||
+              0);
+          const message = data.choices?.[0]?.message;
+          if (!message) throw Error("Provider returned no assistant message");
+          if (!message.tool_calls?.length) {
+            text = message.content || "";
+            break;
+          }
+          if (!bridge || !toolsEnabled)
+            throw Error("Provider requested unavailable tools");
+          if (message.tool_calls.length > 8)
+            throw Error("Provider requested too many tools in one round");
+          messages.push({
+            role: "assistant",
+            content: message.content || null,
+            tool_calls: message.tool_calls,
+          });
+          const rendered = [];
+          for (const call of message.tool_calls) {
+            if (controller.signal.aborted || job.cancelled)
+              throw Error("Stopped by user");
+            let result;
+            try {
+              result = await bridge.call(
+                call.function.name,
+                JSON.parse(call.function.arguments || "{}"),
+              );
+            } catch (e) {
+              result = {
+                isError: true,
+                content: [{ type: "text", text: e.message }],
+              };
+            }
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: result.content
+                .filter((c) => c.type === "text")
+                .map((c) => c.text)
+                .join("\n"),
+            });
+            for (const c of result.content)
+              if (c.type === "image")
+                rendered.push({
+                  type: "image_url",
+                  image_url: { url: `data:${c.mimeType};base64,${c.data}` },
+                });
+          }
+          if (rendered.length)
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Rendered images from the preceding preview tool calls, in call order:",
+                },
+                ...rendered,
+              ],
+            });
+        }
+        if (!text)
+          throw Error(
+            "Provider reached the 12-round tool limit without a final scene; retry with a smaller edit",
+          );
+        emit("usage", JSON.stringify(job.usage));
+      } finally {
+        bridge?.dispose();
       }
-      const data = await response.json();
-      text = data.choices?.[0]?.message?.content || "";
-      job.usage = data.usage || {};
-      emit("usage", JSON.stringify(job.usage));
     } else {
+      const bridge = ["build", "edit", "ultra"].includes(role)
+        ? this.toolBridge?.register(job, emit)
+        : null;
+      if (bridge)
+        prompt +=
+          "\nFramecraft MCP tools are available. Use get_project to find shot IDs, then render_frames with your complete candidate scene to inspect it and check_preview to detect text overflow before returning the final scene JSON. Candidate previews do not save changes.";
       const output = path.join(cwd, `.response-${uid()}.json`);
       let buffer = "";
       const args =
@@ -191,6 +312,22 @@ export class AgentRunner {
               "-c",
               `model_reasoning_effort=${JSON.stringify(route.effort || s.effort || "medium")}`,
               ...(role === "research" ? ["-c", 'web_search="live"'] : []),
+              ...(bridge
+                ? [
+                    "-c",
+                    `mcp_servers.framecraft.command=${JSON.stringify(bridge.config.command)}`,
+                    "-c",
+                    `mcp_servers.framecraft.args=${JSON.stringify(bridge.config.args)}`,
+                    ...Object.entries(bridge.config.env).flatMap(
+                      ([key, value]) => [
+                        "-c",
+                        `mcp_servers.framecraft.env.${key}=${JSON.stringify(value)}`,
+                      ],
+                    ),
+                    "-c",
+                    "mcp_servers.framecraft.tool_timeout_sec=120",
+                  ]
+                : []),
               "-o",
               output,
               ...(model ? ["--model", model] : []),
@@ -208,6 +345,16 @@ export class AgentRunner {
                 ? ["--allowedTools", "WebSearch,WebFetch"]
                 : []),
               "--no-session-persistence",
+              ...(bridge
+                ? [
+                    "--mcp-config",
+                    JSON.stringify({
+                      mcpServers: { framecraft: bridge.config },
+                    }),
+                    "--allowedTools",
+                    "mcp__framecraft__get_project,mcp__framecraft__get_words,mcp__framecraft__get_storyboard,mcp__framecraft__list_assets,mcp__framecraft__measure_layout,mcp__framecraft__render_frames,mcp__framecraft__check_preview",
+                  ]
+                : []),
               ...(model ? ["--model", model] : []),
             ];
       try {
@@ -264,6 +411,7 @@ export class AgentRunner {
         }
         throw e;
       } finally {
+        bridge?.dispose();
         if (fs.existsSync(output)) fs.unlinkSync(output);
       }
     }

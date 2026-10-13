@@ -45,7 +45,7 @@ function transform(e, t) {
   return { x, y, scale, rotation, opacity };
 }
 function lines(text, size, maxWidth) {
-  c.font = `600 ${size}px Arial`;
+  c.font = `${project.style === "collage" ? "bold" : "600"} ${size}px ${project.style === "collage" ? "Georgia" : "Arial"}`;
   let result = [],
     line = "";
   for (const word of text.split(/\s+/)) {
@@ -60,6 +60,9 @@ function lines(text, size, maxWidth) {
 }
 function draw(e, t) {
   const a = transform(e, t);
+  let metric = { id: e.id, type: e.type, visible: a.opacity > 0.01 };
+  let boxWidth = e.type === "circle" ? e.radius * 2 : e.width;
+  let boxHeight = e.type === "circle" ? e.radius * 2 : e.height;
   c.save();
   c.translate(a.x, a.y);
   c.rotate((a.rotation * Math.PI) / 180);
@@ -99,7 +102,11 @@ function draw(e, t) {
   } else if (e.type === "text") {
     let size = e.fontSize,
       ls = lines(e.text, size, e.width);
-    while (ls.length * size * 1.2 > e.height && size > 16) {
+    while (
+      (ls.length * size * 1.2 > e.height ||
+        ls.some((line) => c.measureText(line).width > e.width)) &&
+      size > 16
+    ) {
       size--;
       ls = lines(e.text, size, e.width);
     }
@@ -109,15 +116,49 @@ function draw(e, t) {
     ls.forEach((l, i) =>
       c.fillText(l, 0, (i - (ls.length - 1) / 2) * size * 1.2),
     );
-    metrics.push({
-      id: e.id,
+    boxWidth = Math.max(0, ...ls.map((line) => c.measureText(line).width));
+    boxHeight = ls.length * size * 1.2;
+    metric = {
+      ...metric,
       fontSize: size,
+      overflow: boxHeight > e.height || boxWidth > e.width,
+    };
+  }
+  if (["rect", "circle", "text", "image", "video", "line"].includes(e.type)) {
+    const angle = (a.rotation * Math.PI) / 180;
+    const corners =
+      e.type === "line"
+        ? [
+            [0, 0],
+            [e.width, e.height],
+          ]
+        : [
+            [-boxWidth / 2, -boxHeight / 2],
+            [boxWidth / 2, -boxHeight / 2],
+            [boxWidth / 2, boxHeight / 2],
+            [-boxWidth / 2, boxHeight / 2],
+          ];
+    const points = corners.map(([x, y]) => ({
+      x: a.x + a.scale * (x * Math.cos(angle) - y * Math.sin(angle)),
+      y: a.y + a.scale * (x * Math.sin(angle) + y * Math.cos(angle)),
+    }));
+    const bounds = {
+      left: Math.min(...points.map((p) => p.x)),
+      right: Math.max(...points.map((p) => p.x)),
+      top: Math.min(...points.map((p) => p.y)),
+      bottom: Math.max(...points.map((p) => p.y)),
+    };
+    const offscreen =
+      bounds.left < 0 ||
+      bounds.right > logicalWidth ||
+      bounds.top < 0 ||
+      bounds.bottom > logicalHeight;
+    metrics.push({
+      ...metric,
+      bounds,
+      offscreen,
       overflow:
-        ls.length * size * 1.2 > e.height ||
-        a.x - e.width / 2 < 0 ||
-        a.x + e.width / 2 > logicalWidth ||
-        a.y - e.height / 2 < 0 ||
-        a.y + e.height / 2 > logicalHeight,
+        e.type === "text" && metric.visible && (metric.overflow || offscreen),
     });
   }
   if (selected === e.id) {
