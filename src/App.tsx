@@ -56,6 +56,7 @@ const nav = [
   ["Routines", Workflow],
   ["Renders", Film],
   ["ANALYTICS", null],
+  ["Usage", ChartNoAxesCombined],
   ["YouTube", ChartNoAxesCombined],
 ] as const;
 export default function App() {

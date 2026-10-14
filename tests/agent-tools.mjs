@@ -68,11 +68,35 @@ try {
       .serverInfo.name,
     "framecraft",
   );
-  assert.equal((await request("tools/list")).result.tools.length, 7);
+  assert.ok(
+    (await request("tools/list")).result.tools.some(
+      (t) => t.name === "set_ambience",
+    ),
+  );
   const call = async (name, args = {}) =>
     (await request("tools/call", { name, arguments: args })).result;
   const current = await call("get_project");
   assert.equal(JSON.parse(current.content[0].text).id, p.id);
+  const renamed = await call("update_storyboard", { shots: [{ id: "s001", title: "Staged title" }] });
+  assert.equal(renamed.isError, undefined);
+  assert.equal(job.toolDrafts.titles[0].title, "Staged title");
+  assert.notEqual(service.store.project(p.id).shots[0].title, "Staged title");
+  job.options.scope = "selection";
+  const blocked = await call("set_ambience", { clips: [] });
+  assert.equal(blocked.isError, true);
+  job.options.scope = "whole";
+  const staged = await call("set_ambience", { clips: [] });
+  assert.equal(staged.isError, undefined);
+  assert.ok(job.toolDrafts.timeline);
+  const proposed = await call("save_memory_rule", { text: "Keep short labels readable" });
+  const proposalId = JSON.parse(proposed.content[0].text).id;
+  assert.equal(service.store.all("memory").length, 0);
+  assert.ok(service.store.get("memoryProposals", proposalId));
+  const approved = await fetch(`${service.url}/api/memory-proposals/${proposalId}/approve`, { method: "POST", headers: { Origin: service.url } });
+  assert.equal(approved.status, 200);
+  assert.ok(service.store.get("memory", proposalId));
+  delete job.toolDrafts;
+  console.log("PASS: tool changes stay staged, scoped edits cannot change global tracks, memory requires approval");
   const frames = await call("render_frames", {
     shotId: "s001",
     scene,
@@ -158,7 +182,7 @@ try {
     res.setHeader("Content-Type", "application/json");
     rounds++;
     if (rounds === 1) {
-      assert.equal(request.tools.length, 7);
+      assert.ok(request.tools.some((t) => t.function.name === "fetch_url"));
       res.end(
         JSON.stringify({
           choices: [

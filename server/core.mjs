@@ -263,10 +263,15 @@ export function run(exe, args, options = {}) {
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve({ stdout, stderr });
-      else
-        reject(
-          Error((stderr || stdout || `${exe} exited ${code}`).slice(-6000)),
+      else {
+        const error = Error(
+          (stderr || stdout || `${exe} exited ${code}`).slice(-6000),
         );
+        error.stdout = stdout;
+        error.stderr = stderr;
+        error.exitCode = code;
+        reject(error);
+      }
     });
     if (options.input) child.stdin.write(options.input);
     child.stdin.end();

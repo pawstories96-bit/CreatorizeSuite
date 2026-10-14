@@ -39,11 +39,13 @@ import {
   X,
   LoaderCircle,
   Scissors,
+  SlidersHorizontal,
 } from "lucide-react";
 import { api, media, time, ago, type Project, type State } from "./types";
 import { Button, Modal, Badge, Busy, Empty } from "./ui";
 import Assets from "./Assets";
 import { ProjectModelPicker, providerNames } from "./ModelSelect";
+import { TimelineEditor } from "./TimelineEditor";
 const stageInfo = [
   ["script", "Script written", FileText, "Open"],
   ["voiceover", "Voiceover added", AudioLines, "Add"],
@@ -560,6 +562,12 @@ export default function Editor({
               <span>Timeline</span>
               <small>Click to seek · Shift-drag to select shots</small>
               <div className="row">
+                <button
+                  title="Edit timeline tracks"
+                  onClick={() => setModal("timeline")}
+                >
+                  <SlidersHorizontal size={15} /> Edit tracks
+                </button>
                 {range && (
                   <button
                     title="Clear selected range"
@@ -702,6 +710,18 @@ export default function Editor({
                     ))}
                   </div>
                   <div className="track cues-track">
+                    {p.timeline?.cues.map((c) => (
+                      <button
+                        key={c.id}
+                        title={c.label}
+                        className="timeline-clip cue"
+                        style={{ left: `${(c.time / duration) * 100}%` }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => setModal("timeline")}
+                      >
+                        ◆
+                      </button>
+                    ))}
                     {p.shots.map((s) => (
                       <i
                         key={s.id}
@@ -729,6 +749,21 @@ export default function Editor({
                     )}
                   </div>
                   <div className="track cards-track">
+                    {p.timeline?.cards.map((c) => (
+                      <button
+                        key={c.id}
+                        title={c.text}
+                        className="timeline-clip"
+                        style={{
+                          left: `${(c.start / duration) * 100}%`,
+                          width: `${((c.end - c.start) / duration) * 100}%`,
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => setModal("timeline")}
+                      >
+                        {c.text}
+                      </button>
+                    ))}
                     {p.shots
                       .filter((s) =>
                         s.scene?.elements.some((e: any) => e.type === "text"),
@@ -746,6 +781,21 @@ export default function Editor({
                       ))}
                   </div>
                   <div className="track ambience-track">
+                    {p.timeline?.audio.map((c) => (
+                      <button
+                        key={c.id}
+                        title={`${c.track} ${c.volumeDb} dB`}
+                        className="timeline-clip"
+                        style={{
+                          left: `${(c.start / duration) * 100}%`,
+                          width: `${((c.end - c.start) / duration) * 100}%`,
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => setModal("timeline")}
+                      >
+                        {c.track}
+                      </button>
+                    ))}
                     {p.mix && (
                       <div>
                         {p.mixReport?.ambience.startsWith("assets/")
@@ -1159,6 +1209,15 @@ export default function Editor({
           } else setPlaying(false);
         }}
       />
+      {modal === "timeline" && (
+        <TimelineEditor
+          project={p}
+          at={position}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
       {modal === "script" && (
         <Modal title="The script" wide onClose={() => setModal("")}>
           <div className="modal-body">
@@ -1302,9 +1361,31 @@ export default function Editor({
             ) : (
               <>
                 <label>
+                  Voice provider
+                  <select
+                    value={voiceProvider}
+                    onChange={(e) => {
+                      setVoiceProvider(e.target.value);
+                      setVoice("");
+                    }}
+                  >
+                    {[
+                      ["windows", "Windows"],
+                      ["elevenlabs", "ElevenLabs"],
+                      ["fish", "Fish Audio"],
+                      ["piper", "Piper"],
+                      ["kokoro", "Kokoro"],
+                    ].map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   {voiceProvider === "windows"
                     ? "Windows voice"
-                    : "ElevenLabs voice ID"}
+                    : "Voice ID (leave blank for configured default)"}
                   {voiceProvider === "windows" ? (
                     <select
                       value={voice}
@@ -1319,14 +1400,16 @@ export default function Editor({
                     <input
                       value={voice}
                       onChange={(e) => setVoice(e.target.value)}
-                      placeholder="Voice ID from your ElevenLabs account"
+                      placeholder="Voice ID, or Piper speaker number"
                     />
                   )}
                 </label>
                 <p className="notice">
                   {voiceProvider === "windows"
                     ? "Uses your installed Windows speech engine. Word timings come directly from speech events. Audio is cleaned automatically."
-                    : "Uses your saved ElevenLabs key. This generation consumes your provider allowance."}
+                    : ["piper", "kokoro"].includes(voiceProvider)
+                      ? "Uses your configured local speech engine. Word timing runs locally after synthesis."
+                      : "Uses the provider credentials saved in Connections and consumes your provider allowance."}
                 </p>
                 <p className="form-hint">
                   {p.script.trim().split(/\s+/).filter(Boolean).length}{" "}

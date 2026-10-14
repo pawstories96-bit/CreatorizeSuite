@@ -3369,3 +3369,63 @@ input[type="range"] {
 .form-stack input {
   width: 100%;
 }
+.usage-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin: 28px 0;
+}
+.usage-totals strong {
+  display: block;
+  font-size: 28px;
+  margin: 8px 0;
+}
+.usage-totals small,
+.usage-table small {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.usage-scroll {
+  overflow: auto;
+}
+.usage-table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+}
+.usage-table td,
+.usage-table th {
+  padding: 16px 12px;
+  border-bottom: 1px solid #ffffff14;
+  vertical-align: top;
+}
+.timeline-item-form {
+  padding: 18px;
+}
+.timeline-item-form .row {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.timeline-clip {
+  position: absolute;
+  top: 3px;
+  height: 22px;
+  min-width: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  background: #407b58 !important;
+  border: 1px solid #86b392 !important;
+  border-radius: 4px;
+  color: #f4faf5 !important;
+  font-size: 10px;
+  z-index: 3;
+  padding: 0 4px;
+}
+.timeline-clip.cue {
+  background: transparent !important;
+  border: 0 !important;
+  color: #d7be6f !important;
+  padding: 0;
+}

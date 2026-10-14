@@ -155,6 +155,7 @@ try {
     "Memory",
     "Thumbnails",
     "Routines",
+    "Usage",
     "Renders",
     "YouTube",
     "Connections",

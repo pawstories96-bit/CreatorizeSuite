@@ -27,6 +27,8 @@ import { integrations } from "./integrations.mjs";
 import { assetRoutes } from "./assets.mjs";
 import { AgentTools } from "./agent-tools.mjs";
 import { watchScenes } from "./scene-watch.mjs";
+import { validateTimeline } from "./timeline.mjs";
+import { savedJobError } from "./provider-errors.mjs";
 const appRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -90,9 +92,11 @@ export async function startServer(options = {}) {
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       jobs: store
         .all("jobs")
+        .map((j) => ({ ...j, displayError: savedJobError(j) }))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       channels: store.all("channels"),
       memory: store.all("memory"),
+      memoryProposals: store.all("memoryProposals"),
       styles: [...styles, ...store.all("styles")],
       routines: store.all("routines"),
       thumbnails: store.all("thumbnails"),
@@ -122,6 +126,47 @@ export async function startServer(options = {}) {
     const agent = normalizeAgent(req.body.agent);
     store.put("projectAgents", { id: req.params.id, agent });
     res.json({ agent });
+  });
+  route("post", "/api/projects/:id/timeline", async (req, res) => {
+    const p = store.project(req.params.id);
+    if (
+      pipeline.externalLocks.has(p.id) ||
+      [...pipeline.active.values()].some((j) => j.projectId === p.id)
+    )
+      throw Error("Stop the active job before changing the timeline");
+    const timeline = validateTimeline(req.body, p, store.projectDir(p.id));
+    pipeline.externalLocks.add(p.id);
+    try {
+      if (
+        JSON.stringify(timeline.audio) !==
+        JSON.stringify(p.timeline?.audio || [])
+      ) {
+        p.mix = null;
+        p.pipeline.soundDesign = "pending";
+      }
+      p.timeline = timeline;
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
+      store.saveProject(p);
+      await store.commit(p.id, "Edit cues, cards and sound timeline");
+      res.json(p);
+    } finally {
+      pipeline.externalLocks.delete(p.id);
+      pipeline.pump();
+    }
+  });
+  route("post", "/api/memory-proposals/:id/:action", async (req, res) => {
+    const proposal = store.get("memoryProposals", req.params.id);
+    if (!proposal) throw Error("Proposal not found");
+    if (!["approve", "dismiss"].includes(req.params.action))
+      throw Error("Choose approve or dismiss");
+    if (req.params.action === "approve")
+      store.put("memory", {
+        ...proposal,
+        approvedAt: new Date().toISOString(),
+      });
+    store.remove("memoryProposals", proposal.id);
+    res.json({ ok: true });
   });
   route("get", "/api/models/:provider", async (req, res) => {
     res.json(
@@ -369,6 +414,7 @@ export async function startServer(options = {}) {
         "mix",
         "export",
         "thumbnail",
+        "thumbnail-helper",
         "metadata",
         "trailer",
         "notify",
@@ -393,6 +439,25 @@ export async function startServer(options = {}) {
       const j = store.get("jobs", id);
       if (!j || j.action !== "routine" || j.status !== "waiting")
         throw Error("This job is not waiting for approval");
+      if (j.waitingChild) {
+        const child = store.get("jobs", j.waitingChild);
+        if (!child || child.status !== "waiting" || child.budgetBlocked)
+          throw Error("The waiting topic needs attention before approval");
+        child.approvedCheckpoints = [
+          ...(child.approvedCheckpoints || []),
+          child.checkpoint,
+        ];
+        store.put("jobs", child);
+        delete j.waitingChild;
+        store.put("jobs", j);
+        pipeline.resume(id);
+        res.json({ ok: true });
+        return;
+      }
+      if (j.budgetBlocked)
+        throw Error(
+          "This run is waiting at a budget checkpoint, not an upload approval. Update the routine limit and retry.",
+        );
       j.approvedCheckpoints = [...(j.approvedCheckpoints || []), j.checkpoint];
       store.put("jobs", j);
       pipeline.resume(id);
@@ -471,6 +536,18 @@ export async function startServer(options = {}) {
     delete data.vault;
     delete data.apiKey;
     delete data.elevenlabs;
+    if (data.fallbacks) {
+      for (const chain of Object.values(data.fallbacks)) {
+        if (!Array.isArray(chain) || chain.length > 4)
+          throw Error("Use at most four fallback models per role");
+        chain.forEach(normalizeAgent);
+      }
+    }
+    for (const price of Object.values(data.modelPrices || {})) {
+      for (const value of Object.values(price))
+        if (value != null && (!Number.isFinite(value) || value < 0))
+          throw Error("Model prices must be nonnegative numbers");
+    }
     store.put("settings", data);
     res.json(data);
   });
@@ -481,6 +558,7 @@ export async function startServer(options = {}) {
         "elevenlabs",
         "fish",
         "imageKey",
+        "fish",
         "googleClientId",
         "googleClientSecret",
       ].includes(req.body.name)
@@ -564,6 +642,21 @@ export async function startServer(options = {}) {
         updatedAt: new Date().toISOString(),
       };
       if (kind === "routines") topo(value.nodes || [], value.edges || []);
+      if (
+        kind === "routines" &&
+        value.topicsPerRun != null &&
+        (!Number.isInteger(value.topicsPerRun) ||
+          value.topicsPerRun < 1 ||
+          value.topicsPerRun > 10)
+      )
+        throw Error("Choose 1–10 topics per run");
+      if (kind === "routines")
+        for (const key of ["maxRunsPerDay", "maxCost"])
+          if (
+            value[key] != null &&
+            (!Number.isFinite(value[key]) || value[key] < 0)
+          )
+            throw Error("Routine limits must be nonnegative numbers");
       if (kind === "memory" && !value.text?.trim())
         throw Error("Rule cannot be empty");
       if (kind === "channels" && !value.name?.trim())
@@ -722,7 +815,11 @@ export async function startServer(options = {}) {
       if (time === r.schedule.time && r.lastScheduledDay !== today) {
         r.lastScheduledDay = today;
         store.put("routines", r);
-        pipeline.enqueue(r.projectId || null, "routine", { routineId: r.id });
+        try {
+          pipeline.enqueue(r.projectId || null, "routine", { routineId: r.id });
+        } catch (error) {
+          store.put("routines", { ...r, lastError: error.message });
+        }
       }
     }
   }, 15000);

@@ -6,6 +6,8 @@ export function snapshotAgentSettings(settings) {
     localModel: settings.localModel || "",
     effort: settings.effort ?? "medium",
     roles: settings.roles || {},
+    fallbacks: settings.fallbacks || {},
+    enableFallbacks: settings.enableFallbacks === true,
   });
 }
 export function normalizeAgent(value) {
@@ -53,5 +55,31 @@ export function resolveAgentRoute(settings, role, ...overrides) {
     if (Object.hasOwn(override, "model")) route.model = override.model || "";
     if (Object.hasOwn(override, "effort")) route.effort = override.effort || "";
   }
+  // An explicitly configured reviewer remains independent of the builder.
+  if (role === "qa" && roleRoute?.provider) {
+    route = {
+      provider: roleRoute.provider,
+      model: roleRoute.model || "",
+      effort: roleRoute.effort || "",
+    };
+  }
   return route;
+}
+
+export function resolveAgentRoutes(settings, role, ...overrides) {
+  const primary = resolveAgentRoute(settings, role, ...overrides);
+  const fallbacks = settings.enableFallbacks
+    ? settings.fallbacks?.[role] ||
+      (role === "research" ? settings.fallbacks?.script : []) ||
+      []
+    : [];
+  const routes = [
+    primary,
+    ...fallbacks.slice(0, 4).map(normalizeAgent).filter(Boolean),
+  ];
+  return [
+    ...new Map(
+      routes.map((r) => [`${r.provider}:${r.model}:${r.effort}`, r]),
+    ).values(),
+  ];
 }

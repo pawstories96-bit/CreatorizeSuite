@@ -28,6 +28,14 @@ function ease(x) {
   return 1 - (1 - x) ** 3;
 }
 function transform(e, t) {
+  const cue = project?.timeline?.cues?.find(
+    (cue) => cue.shotId === shot?.id && cue.elementId === e.id,
+  );
+  if (cue) {
+    e = { ...e, delay: cue.time - shot.start };
+    if (t < e.delay)
+      return { x: e.x, y: e.y, scale: 1, rotation: e.rotation, opacity: 0 };
+  }
   let p = ease((t - e.delay) / e.duration),
     x = e.x,
     y = e.y,
@@ -264,17 +272,6 @@ function render(t) {
   c.fillRect(0, 0, logicalWidth, logicalHeight);
   if (s?.scene) {
     const local = Math.max(0, t - s.start);
-    for (const e of s.scene.elements)
-      if (!["box", "sphere", "cylinder", "cone", "model"].includes(e.type))
-        draw(e, local);
-    if (s.scene.label || project.style === "3d") {
-      c.fillStyle = "rgba(0,0,0,.6)";
-      c.fillRect(logicalWidth - 270, 24, 246, 34);
-      c.fillStyle = "#fff";
-      c.font = "13px monospace";
-      c.textAlign = "center";
-      c.fillText(s.scene.label || "RECONSTRUCTION", logicalWidth - 147, 46);
-    }
     for (const { m, e, mixer } of meshes) {
       const a = transform(e, local);
       m.position.set(a.x, a.y, e.z);
@@ -292,8 +289,21 @@ function render(t) {
         }
       });
     }
-    if (renderer && threeCanvas.style.display !== "none")
+    if (renderer && threeCanvas.style.display !== "none") {
       renderer.render(world, camera);
+      c.drawImage(threeCanvas, 0, 0, logicalWidth, logicalHeight);
+    }
+    for (const e of s.scene.elements)
+      if (!["box", "sphere", "cylinder", "cone", "model"].includes(e.type))
+        draw(e, local);
+    if (s.scene.label || project.style === "3d") {
+      c.fillStyle = "rgba(0,0,0,.6)";
+      c.fillRect(logicalWidth - 270, 24, 246, 34);
+      c.fillStyle = "#fff";
+      c.font = "13px monospace";
+      c.textAlign = "center";
+      c.fillText(s.scene.label || "RECONSTRUCTION", logicalWidth - 147, 46);
+    }
   } else {
     c.fillStyle = "#74847e";
     c.font = "22px Arial";
@@ -313,6 +323,39 @@ function render(t) {
       384,
     );
   }
+  for (const card of project.timeline?.cards || [])
+    if (t >= card.start && t < card.end) {
+      draw(
+        {
+          ...card,
+          type: "rect",
+          fill: card.background,
+          opacity: 1,
+          rotation: 0,
+          animation: "none",
+          delay: 0,
+          duration: 1,
+          strokeWidth: 0,
+        },
+        0,
+      );
+      draw(
+        {
+          ...card,
+          id: card.id + "-text",
+          type: "text",
+          width: card.width - 24,
+          height: card.height - 16,
+          opacity: 1,
+          rotation: 0,
+          animation: "none",
+          delay: 0,
+          duration: 1,
+          strokeWidth: 0,
+        },
+        0,
+      );
+    }
   c.restore();
   return { shotId: s?.id, metrics };
 }
@@ -473,13 +516,30 @@ canvas.addEventListener("click", (event) => {
     x = ((event.clientX - r.left) / r.width) * logicalWidth,
     y = ((event.clientY - r.top) / r.height) * logicalHeight;
   const e = [...(shot?.scene?.elements || [])]
+    .filter(
+      (e) => !["box", "sphere", "cylinder", "cone", "model"].includes(e.type),
+    )
     .reverse()
     .find(
       (e) =>
         Math.abs(x - e.x) < (e.type === "circle" ? e.radius : e.width / 2) &&
         Math.abs(y - e.y) < (e.type === "circle" ? e.radius : e.height / 2),
     );
-  selected = e?.id || null;
+  let hit;
+  if (!e && world && threeCanvas.style.display !== "none") {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(
+      new THREE.Vector2(
+        (x / logicalWidth) * 2 - 1,
+        (-y / logicalHeight) * 2 + 1,
+      ),
+      camera,
+    );
+    hit = ray
+      .intersectObjects(world.children, true)
+      .find((h) => h.object.userData.id);
+  }
+  selected = e?.id || hit?.object.userData.id || null;
   render(currentTime);
   parent.postMessage(
     { type: "selection", id: selected, shotId: shot?.id },

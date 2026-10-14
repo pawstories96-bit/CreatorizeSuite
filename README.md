@@ -24,6 +24,7 @@ The desktop workspace lives in `Documents/Framecraft Workspace`. `FRAMECRAFT_WOR
 3. Generate a Windows voiceover or import a recording. Windows speech is free and local. Imported recordings use local Whisper timing.
 4. Build the video. Review shots while the build continues; use the chat panel for a shot/object/video edit. Shift-drag the timeline to edit all shots overlapping a range. Completed edits include actual Before / After frames in the result card and History. Higher review tiers run additional checks.
 5. Import images, MP4s, GLBs or audio in Assets as needed. Use an audio file as a ducked bed beneath narration.
+   Open **Edit tracks** in the editor to set element cues, timed cards and music/ambience/SFX clips. Run Sound design after changing audio tracks to rebuild the mix.
 6. Export the MP4 and SRT. Optional YouTube publishing requires your own Google OAuth setup and explicit upload review.
 
 ## Runtime dependencies
@@ -33,6 +34,10 @@ The desktop workspace lives in `Documents/Framecraft Workspace`. `FRAMECRAFT_WOR
 - Python 3.13 is used for faster-whisper. On first transcription the app can create a private virtual environment and install faster-whisper; the selected speech model is downloaded once. This needs internet access on first setup.
 - Windows TTS uses installed system voices. ElevenLabs, compatible API/image providers and YouTube are optional and require configuration; unavailable providers produce real errors.
 - Subscription access uses official CLIs only. The app never extracts subscription tokens. API credentials are encrypted for the current OS user.
+- Connections includes opt-in per-role fallback chains and per-model pricing. Usage shows successful and failed attempts, including cache tokens. Subscription cost estimates are API equivalents, not additional charges. Historical connection results display their date; retry to check the current provider status.
+- Settings supports Piper (executable plus ONNX voice and matching JSON), Kokoro (running compatible speech endpoint), Fish Audio (key and reference voice), and ComfyUI (running server plus installed checkpoint). These adapters do not install model weights or start third-party servers.
+- ComfyUI custom workflows use API-format JSON with `{{prompt}}`, `{{model}}` and `{{reference:0}}` placeholders. Without a custom workflow the standard checkpoint graph accepts one reference image. Thumbnails supports reference analysis, channel style keys, variants and regeneration history.
+- Multi-topic routines create separate projects sequentially and preserve each branch's approval/checkpoint. Upload steps require a prior approved Approval step and configured YouTube authorization. Cost limits apply between steps; an in-flight request can exceed the threshold. Unknown prices pause a budget-limited routine. Set the missing prices or adjust the limit before retrying.
 
 ## Build and test
 
@@ -44,6 +49,9 @@ npm run test:desktop
 node tests/agent-tools.mjs
 node tests/editing.mjs
 node tests/models.mjs
+node tests/connection-ui.mjs
+node tests/timeline.mjs
+node tests/adapters.mjs
 npm run package
 $env:PACKAGED_EXE='release/win-unpacked/Framecraft Studio.exe'
 node tests/desktop.mjs
@@ -72,3 +80,5 @@ Live provider tests consume the selected provider's usage allowance. Core tests 
 This is local software with optional external AI services. The full attached brief is not yet complete; PROGRESS.md separates implemented, externally unverified and unfinished work.
 
 API behavior references: [YouTube resumable uploads](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol), [video publishing fields](https://developers.google.com/youtube/v3/docs/videos), [retention reports](https://developers.google.com/youtube/analytics/channel_reports), and [comment retrieval](https://developers.google.com/youtube/v3/docs/commentThreads/list).
+
+Adapter references: [Claude streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), [Fish speech](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech), [Piper CLI](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/CLI.md), [Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI), and [ComfyUI server routes](https://docs.comfy.org/development/comfyui-server/comms_routes).

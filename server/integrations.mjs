@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { uid, atomic, read, safePath } from "./core.mjs";
 import { transferUpload, cancelUploads } from "./youtube-upload.mjs";
 import { audienceRoutes } from "./audience.mjs";
+import { comfyModels, generateComfy } from "./comfy.mjs";
 export function integrations(app, { store, vault, getBase, pipeline }) {
   const route = (method, url, fn) =>
     app[method](url, async (req, res, next) => {
@@ -176,6 +177,30 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
     res.json({ rows: j.rows || [], totals });
   });
   route("post", "/api/youtube/upload", async (req, res) => {
+    res.json(await uploadVideo(req.body));
+  });
+  pipeline.uploadVideo = async (body) => {
+    const p = store.project(body.projectId);
+    const record = store
+      .all("uploads")
+      .find((r) => r.projectId === p.id && r.path === p.lastExport);
+    if (record?.status === "done")
+      return {
+        id: record.videoId,
+        url: `https://www.youtube.com/watch?v=${record.videoId}`,
+      };
+    if (record) {
+      const result = await transferUpload(store, token, record, true);
+      await finishUpload(p, record, result);
+      return {
+        id: result.id,
+        url: `https://www.youtube.com/watch?v=${result.id}`,
+      };
+    }
+    return uploadVideo(body);
+  };
+  async function uploadVideo(body) {
+    const req = { body };
     const p = store.project(req.body.projectId);
     if (!p.lastExport) throw Error("Export the video before uploading");
     if (
@@ -258,12 +283,12 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
     store.put("uploads", record);
     const result = await transferUpload(store, token, record);
     await finishUpload(p, record, result);
-    res.json({
+    return {
       id: result.id,
       url: `https://www.youtube.com/watch?v=${result.id}`,
       warning: record.thumbnailError,
-    });
-  });
+    };
+  }
   async function finishUpload(p, record, result) {
     p.youtubeVideoId = result.id;
     p.status = "published";
@@ -316,10 +341,47 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
     const p = store.project(req.body.projectId),
       s = store.settings(),
       key = (await vault.get("imageKey")) || (await vault.get("apiKey"));
+    if (s.imageProvider === "comfy") {
+      const refs = (req.body.references || []).map((ref) => {
+        const file = safePath(store.projectDir(ref.projectId), ref.path);
+        if (!/\.(png|jpe?g|webp)$/i.test(file))
+          throw Error("Use image references");
+        return { bytes: fs.readFileSync(file), mime: /\.webp$/i.test(file) ? "image/webp" : /\.jpe?g$/i.test(file) ? "image/jpeg" : "image/png" };
+      });
+      const channel = store.get("channels", p.channelId);
+      const result = await generateComfy({
+        settings: s,
+        prompt: [req.body.prompt, channel?.thumbnailStyleKey]
+          .filter(Boolean)
+          .join("\n"),
+        references: refs,
+      });
+      const rel = `assets/thumbnail-${uid()}.png`;
+      atomic(path.join(store.projectDir(p.id), rel), result.bytes);
+      const record = store.put("thumbnails", {
+        id: uid(),
+        name: p.title,
+        projectId: p.id,
+        path: rel,
+        prompt: req.body.prompt,
+        provider: "comfy",
+        model: result.model,
+        seed: result.seed,
+        promptId: result.promptId,
+        parentId: req.body.parentId || null,
+        createdAt: new Date().toISOString(),
+      });
+      res.json(record);
+      return;
+    }
     if (!key) throw Error("Add an image provider key in Connections");
     if (!s.imageModel || !s.imageUrl)
       throw Error("Set your image generation model and endpoint in Settings");
     const references = req.body.references || [];
+    const channel = store.get("channels", p.channelId);
+    const prompt = [String(req.body.prompt || ""), channel?.thumbnailStyleKey]
+      .filter(Boolean)
+      .join("\n");
     if (!Array.isArray(references) || references.length > 8)
       throw Error("Use up to eight image references");
     let body,
@@ -333,7 +395,7 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
       endpoint = s.imageEditUrl;
       body = new FormData();
       body.append("model", s.imageModel);
-      body.append("prompt", String(req.body.prompt));
+      body.append("prompt", prompt);
       body.append("size", "1536x1024");
       for (const ref of references) {
         store.project(ref.projectId);
@@ -357,7 +419,7 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify({
         model: s.imageModel,
-        prompt: String(req.body.prompt),
+        prompt,
         n: 1,
         size: "1536x1024",
       });
@@ -392,10 +454,19 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
       projectId: p.id,
       path: rel,
       prompt: req.body.prompt,
+      provider: "api",
+      model: s.imageModel,
+      parentId: req.body.parentId || null,
+      styleKey: channel?.thumbnailStyleKey || "",
       createdAt: new Date().toISOString(),
     });
     res.json(t);
   });
+  route("get", "/api/comfy/models", async (req, res) =>
+    res.json(
+      await comfyModels(store.settings().comfyUrl || "http://127.0.0.1:8188"),
+    ),
+  );
   audienceRoutes(app, { store, google, pipeline });
   return { close: () => cancelUploads(store.root) };
 }

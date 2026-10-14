@@ -263,22 +263,19 @@ try {
     "PASS: running and queued jobs preserve model snapshots; new jobs use the new selection without leaking models across providers",
   );
   assert.deepEqual(errors, []);
-  const qaJob = {
-    id: uid(),
-    projectId: p.id,
-    options: {},
-    events: [],
-    agentSettingsSnapshot: { provider: "codex" },
-    projectAgentSnapshot: { provider: "claude", model: "", effort: "" },
-  };
-  await assert.rejects(
-    service.pipeline.visionQA(service.store.project(p.id), qaJob, () => {
-      throw Error("Must not run image review with an unsupported adapter");
-    }),
-    /Visual verification did not run/,
+  assert.equal(
+    resolveAgentRoute(
+      {
+        provider: "claude",
+        roles: { qa: { provider: "codex", model: "reviewer" } },
+      },
+      "qa",
+      { provider: "claude", model: "builder" },
+    ).model,
+    "reviewer",
   );
   console.log(
-    "PASS: visual QA checks the selected project provider instead of assuming the workspace provider",
+    "PASS: an explicit QA role stays independent of the project's builder",
   );
   atomic("test-results/model-results.json", {
     passed: true,

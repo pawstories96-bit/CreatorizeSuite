@@ -39,6 +39,7 @@ export type Project = {
   timingSource?: string;
   agent?: { provider: string; model: string; effort: string } | null;
   needsReview?: boolean;
+  timeline?: { cues: any[]; cards: any[]; audio: any[] };
 };
 export type Job = {
   id: string;
@@ -51,6 +52,7 @@ export type Job = {
   finishedAt?: string;
   events: { type: string; text: string; at: string }[];
   error?: string;
+  displayError?: string;
   commit?: string;
   comparisons?: {
     shotId: string;
@@ -81,6 +83,7 @@ export type State = {
   jobs: Job[];
   channels: any[];
   memory: any[];
+  memoryProposals?: any[];
   styles: any[];
   routines: any[];
   thumbnails: any[];

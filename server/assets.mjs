@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { atomic, read, allowedLicense, uid } from "./core.mjs";
+import { atomic, read, allowedLicense, uid, run } from "./core.mjs";
+import { publicDownload } from "./research.mjs";
 const strip = (s) =>
   String(s || "")
     .replace(/<[^>]*>/g, "")
@@ -65,7 +66,7 @@ export function assetRoutes(app, store) {
       sourceUrl.hash = "";
       if (
         !license ||
-        !/^https:\/\/upload\.wikimedia\.org\/.+\.(png|jpe?g|webp)$/i.test(
+        !/^https:\/\/upload\.wikimedia\.org\/.+\.(png|jpe?g|webp|webm|ogv|mp4)$/i.test(
           sourceUrl.href,
         )
       )
@@ -91,21 +92,51 @@ export function assetRoutes(app, store) {
     const url = new URL(item.url);
     if (url.protocol !== "https:" || url.hostname !== "upload.wikimedia.org")
       throw Error("Only Wikimedia Commons downloads are supported here");
-    const r = await fetch(url, {
-      headers: { "User-Agent": "FramecraftStudio/0.1 (local video authoring)" },
-      signal: AbortSignal.timeout(60000),
-      redirect: "error",
-    });
-    if (!r.ok) throw Error(`Asset download failed: ${r.status}`);
-    if (Number(r.headers.get("content-length")) > 40 * 1024 * 1024)
-      throw Error("Asset exceeds 40 MB");
-    const bytes = Buffer.from(await r.arrayBuffer());
-    if (bytes.length > 40 * 1024 * 1024) throw Error("Asset exceeds 40 MB");
+    const { bytes } = await publicDownload(url.href, 150 * 1024 * 1024);
     const ext = path.extname(url.pathname).toLowerCase();
-    if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext))
-      throw Error("Only static images are supported");
-    const rel = `assets/${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 24)}${ext}`;
-    atomic(path.join(store.projectDir(p.id), rel), bytes);
+    if (
+      ![".jpg", ".jpeg", ".png", ".webp", ".webm", ".ogv", ".mp4"].includes(ext)
+    )
+      throw Error("Choose an image or video asset");
+    const video = [".webm", ".ogv", ".mp4"].includes(ext),
+      hash = crypto
+        .createHash("sha256")
+        .update(bytes)
+        .digest("hex")
+        .slice(0, 24);
+    const rel = `assets/${hash}${video ? ".mp4" : ext}`,
+      destination = path.join(store.projectDir(p.id), rel);
+    if (video) {
+      const source = path.join(
+        store.projectDir(p.id),
+        "assets",
+        hash + "-source" + ext,
+      );
+      atomic(source, bytes);
+      try {
+        await run(
+          "ffmpeg",
+          [
+            "-y",
+            "-i",
+            source,
+            "-map",
+            "0:v:0",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            destination,
+          ],
+          { timeout: 180000 },
+        );
+      } finally {
+        fs.rmSync(source, { force: true });
+      }
+    } else atomic(destination, bytes);
     const ledgerPath = path.join(
         store.projectDir(p.id),
         "assets",

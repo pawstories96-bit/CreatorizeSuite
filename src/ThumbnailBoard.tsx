@@ -73,6 +73,7 @@ export function ThumbnailBoard({
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   const [saving, setSaving] = useState(false),
+    [count, setCount] = useState(1),
     [busy, setBusy] = useState(""),
     [imageId, setImageId] = useState("");
   const current = useRef({ nodes, edges });
@@ -144,41 +145,46 @@ export function ThumbnailBoard({
     if (!n?.data.text?.trim()) return notify("Write an image prompt first.");
     setBusy(id);
     try {
-      const t = await api("/thumbnails/generate", "POST", {
-        projectId: p,
-        prompt: [
-          n.data.text,
-          ...incoming
-            .filter((n) => n.data.kind !== "image")
-            .map((n) => n.data.text),
-        ].join("\n"),
-        references: incoming
-          .filter((n) => n.data.kind === "image")
-          .map((n) => ({ projectId: n.data.projectId, path: n.data.path })),
-      });
-      const project = state.projects.find((p) => p.id === t.projectId)!;
-      const outputId = crypto.randomUUID();
-      setNodes((ns) => [
-        ...ns,
-        {
-          id: outputId,
-          type: "card",
-          position: { x: n.position.x + 350, y: n.position.y },
-          data: {
-            kind: "image",
-            label: "Generated image",
-            text: t.name,
-            url: media(project, t.path),
-            projectId: t.projectId,
-            path: t.path,
+      for (let variant = 0; variant < count; variant++) {
+        const t = await api("/thumbnails/generate", "POST", {
+          projectId: p,
+          prompt: [
+            n.data.text,
+            ...incoming
+              .filter((n) => n.data.kind !== "image")
+              .map((n) => n.data.text),
+          ].join("\n"),
+          references: incoming
+            .filter((n) => n.data.kind === "image")
+            .map((n) => ({ projectId: n.data.projectId, path: n.data.path })),
+        });
+        const project = state.projects.find((p) => p.id === t.projectId)!;
+        const outputId = crypto.randomUUID();
+        setNodes((ns) => [
+          ...ns,
+          {
+            id: outputId,
+            type: "card",
+            position: {
+              x: n.position.x + 350,
+              y: n.position.y + variant * 330,
+            },
+            data: {
+              kind: "image",
+              label: "Generated image",
+              text: t.name,
+              url: media(project, t.path),
+              projectId: t.projectId,
+              path: t.path,
+            },
           },
-        },
-      ]);
-      setEdges((es) => [
-        ...es,
-        { id: crypto.randomUUID(), source: id, target: outputId },
-      ]);
-      await refresh();
+        ]);
+        setEdges((es) => [
+          ...es,
+          { id: crypto.randomUUID(), source: id, target: outputId },
+        ]);
+        await refresh();
+      }
       notify("Image generated. Save the canvas to keep its layout.");
     } catch (e: any) {
       notify(e.message);
@@ -213,6 +219,17 @@ export function ThumbnailBoard({
   return (
     <div className="panel thumbnail-board">
       <div className="row board-toolbar">
+        <select
+          aria-label="Image variants"
+          value={count}
+          onChange={(e) => setCount(Number(e.target.value))}
+        >
+          {[1, 2, 3].map((n) => (
+            <option key={n} value={n}>
+              {n} image{n > 1 ? "s" : ""} per prompt
+            </option>
+          ))}
+        </select>
         <Button small onClick={() => add("prompt")}>
           <Plus size={14} />
           Prompt

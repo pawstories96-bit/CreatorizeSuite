@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ThumbnailBoard } from "./ThumbnailBoard";
+import { ThumbnailHelper } from "./ThumbnailHelper";
 import { AudienceLearning } from "./AudienceLearning";
 import { ModelSelect } from "./ModelSelect";
+import { ProviderPolicy } from "./ProviderPolicy";
+import { UsageDashboard } from "./UsageDashboard";
+import { ImageProviderSettings } from "./ImageProviderSettings";
 import {
   Plus,
   Sparkles,
@@ -132,6 +136,12 @@ export function WorkspacePages({
     setSettings((s: any) => ({ ...s, [k]: v }));
   if (page === "Routines")
     return <RoutinePage state={state} refresh={refresh} notify={notify} />;
+  if (page === "Usage")
+    return (
+      <div className="page">
+        <UsageDashboard state={state} />
+      </div>
+    );
   return (
     <div className="page">
       {page === "Styles" && (
@@ -227,6 +237,33 @@ export function WorkspacePages({
             </div>
             <span className="subtle">{state.memory.length} saved rules</span>
           </div>
+          {state.memoryProposals?.map((r) => (
+            <div className="panel rule-card" key={r.id}>
+              <div>
+                <strong>
+                  Suggested rule · {r.projectId ? "project" : "all projects"}
+                </strong>
+                <p>{r.text}</p>
+              </div>
+              <Button
+                onClick={() =>
+                  act(
+                    () => api(`/memory-proposals/${r.id}/approve`, "POST"),
+                    "Rule approved",
+                  )
+                }
+              >
+                Approve
+              </Button>
+              <Button
+                onClick={() =>
+                  act(() => api(`/memory-proposals/${r.id}/dismiss`, "POST"))
+                }
+              >
+                Dismiss
+              </Button>
+            </div>
+          ))}
           {state.memory.filter((r) =>
             scope === "global" ? !r.projectId : r.projectId === active?.id,
           ).length ? (
@@ -528,6 +565,12 @@ export function WorkspacePages({
               ))}
             </select>
           </div>
+          <ThumbnailHelper
+            state={state}
+            projectId={projectId}
+            refresh={refresh}
+            notify={notify}
+          />
           {boardView ? (
             <ThumbnailBoard
               key={projectId}
@@ -551,6 +594,30 @@ export function WorkspacePages({
                       </div>
                       <div className="project-info">
                         <h3>{t.name}</h3>
+                        <small>
+                          {t.provider || "Captured / imported"}
+                          {t.model ? ` · ${t.model}` : ""}
+                          {t.parentId ? " · regenerated variant" : ""}
+                        </small>
+                        {t.prompt && (
+                          <Button
+                            small
+                            disabled={busy}
+                            onClick={() =>
+                              act(
+                                () =>
+                                  api("/thumbnails/generate", "POST", {
+                                    projectId: t.projectId,
+                                    prompt: t.prompt,
+                                    parentId: t.id,
+                                  }),
+                                "New variant added to the library",
+                              )
+                            }
+                          >
+                            Regenerate variant
+                          </Button>
+                        )}
                         <div className="row spread">
                           <small>{ago(t.createdAt || t.updatedAt)}</small>
                           <Button
@@ -778,15 +845,6 @@ export function WorkspacePages({
                   placeholder="http://127.0.0.1:11434/v1"
                 />
               </label>
-              {settings.provider !== "local" && (
-                <ModelSelect
-                  provider="local"
-                  value={settings.localModel || ""}
-                  onChange={(value) => set("localModel", value)}
-                  endpoint={settings.localUrl}
-                  label="Local model"
-                />
-              )}
               <label>
                 API base URL
                 <input
@@ -864,7 +922,38 @@ export function WorkspacePages({
               .map((j) => (
                 <div className="notice" key={j.id}>
                   <Badge status={j.status}>{j.status}</Badge>{" "}
-                  {j.error || j.events.at(-1)?.text}
+                  <strong>
+                    {j.provider || "Provider"} ·{" "}
+                    {new Date(
+                      j.finishedAt || j.startedAt || j.createdAt,
+                    ).toLocaleString()}
+                  </strong>
+                  <p>
+                    {j.displayError ||
+                      j.error ||
+                      j.events
+                        .filter(
+                          (e) => e.type !== "usage" && e.type !== "diagnostic",
+                        )
+                        .at(-1)?.text}
+                  </p>
+                  {j.error && (
+                    <details>
+                      <summary>Diagnostic log</summary>
+                      <pre
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          maxHeight: 220,
+                          overflow: "auto",
+                        }}
+                      >
+                        {j.events
+                          .slice(-12)
+                          .map((e) => `${e.at} ${e.type}: ${e.text}`)
+                          .join("\n")}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               ))}
             {state.settings.calibrations?.map((c: any) => (
@@ -925,69 +1014,80 @@ export function WorkspacePages({
               </Button>
             </div>
             <div className="role-table">
-              {["script", "build", "edit", "ultra", "qa", "metadata"].map(
-                (role) => (
-                  <div className="role-row" key={role}>
-                    <span>
-                      {
-                        (
-                          {
-                            script: "Research & script",
-                            build: "Scene building",
-                            edit: "Editing",
-                            ultra: "UltraEdit",
-                            qa: "Vision QA",
-                            metadata: "Title & description",
-                          } as any
-                        )[role]
-                      }
-                    </span>
-                    <select
-                      value={settings.roles?.[role]?.provider || ""}
-                      onChange={(e) =>
-                        set("roles", {
-                          ...settings.roles,
-                          [role]: {
-                            ...settings.roles?.[role],
-                            provider: e.target.value,
-                            model: "",
-                          },
-                        })
-                      }
-                    >
-                      <option value="">Use default</option>
-                      <option value="codex">Codex</option>
-                      <option value="claude">Claude</option>
-                      <option value="local">Local</option>
-                      <option value="api">API</option>
-                    </select>
-                    <ModelSelect
-                      provider={
-                        settings.roles?.[role]?.provider ||
-                        settings.provider ||
-                        "codex"
-                      }
-                      label={`${role === "qa" ? "QA" : role[0].toUpperCase() + role.slice(1)} model`}
-                      value={settings.roles?.[role]?.model || ""}
-                      onChange={(value) =>
-                        set("roles", {
-                          ...settings.roles,
-                          [role]: {
-                            ...settings.roles?.[role],
-                            model: value,
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                ),
-              )}
+              {[
+                "script",
+                "storyboard",
+                "build",
+                "edit",
+                "ultra",
+                "qa",
+                "thumbnail",
+                "metadata",
+              ].map((role) => (
+                <div className="role-row" key={role}>
+                  <span>
+                    {
+                      (
+                        {
+                          script: "Research & script",
+                          build: "Scene building",
+                          edit: "Editing",
+                          ultra: "UltraEdit",
+                          qa: "Vision QA",
+                          metadata: "Title & description",
+                          storyboard: "Storyboard",
+                          thumbnail: "Thumbnail helper",
+                        } as any
+                      )[role]
+                    }
+                  </span>
+                  <select
+                    value={settings.roles?.[role]?.provider || ""}
+                    onChange={(e) =>
+                      set("roles", {
+                        ...settings.roles,
+                        [role]: {
+                          ...settings.roles?.[role],
+                          provider: e.target.value,
+                          model: "",
+                        },
+                      })
+                    }
+                  >
+                    <option value="">Use default</option>
+                    <option value="codex">Codex</option>
+                    <option value="claude">Claude</option>
+                    <option value="local">Local</option>
+                    <option value="api">API</option>
+                  </select>
+                  <ModelSelect
+                    provider={
+                      settings.roles?.[role]?.provider ||
+                      settings.provider ||
+                      "codex"
+                    }
+                    label={`${role === "qa" ? "QA" : role[0].toUpperCase() + role.slice(1)} model`}
+                    value={settings.roles?.[role]?.model || ""}
+                    onChange={(value) =>
+                      set("roles", {
+                        ...settings.roles,
+                        [role]: {
+                          ...settings.roles?.[role],
+                          model: value,
+                        },
+                      })
+                    }
+                  />
+                </div>
+              ))}
             </div>
           </section>
+          <ProviderPolicy settings={settings} set={set} />
         </>
       )}
       {page === "Settings" && (
         <>
+          <ImageProviderSettings settings={settings} set={set} />
           <PageHead
             eyebrow="MAKE YOURSELF AT HOME"
             title="Settings"
@@ -1113,6 +1213,9 @@ export function WorkspacePages({
                   onChange={(e) => set("ttsProvider", e.target.value)}
                 >
                   <option value="windows">Windows voice · Free</option>
+                  <option value="piper">Piper · Local</option>
+                  <option value="kokoro">Kokoro · Local server</option>
+                  <option value="fish">Fish Audio</option>
                   <option value="elevenlabs">ElevenLabs</option>
                 </select>
               </label>
@@ -1132,6 +1235,22 @@ export function WorkspacePages({
                   placeholder="Model supported by your image endpoint"
                 />
               </label>
+              {[
+                ["piperExecutable", "Piper executable path"],
+                ["piperModel", "Piper ONNX voice path"],
+                ["kokoroUrl", "Kokoro API base URL"],
+                ["kokoroVoice", "Kokoro default voice"],
+                ["fishVoice", "Fish reference voice ID"],
+                ["fishModel", "Fish model (optional)"],
+              ].map(([key, label]) => (
+                <label key={key}>
+                  {label}
+                  <input
+                    value={settings[key] || ""}
+                    onChange={(e) => set(key, e.target.value)}
+                  />
+                </label>
+              ))}
               <label>
                 Image API endpoint
                 <input
@@ -1482,6 +1601,7 @@ export function WorkspacePages({
                   ["apiKey", "AI API key"],
                   ["elevenlabs", "ElevenLabs"],
                   ["imageKey", "Image provider"],
+                  ["fish", "Fish Audio"],
                   ["googleClientId", "Google Desktop client ID"],
                   ["googleClientSecret", "Google Desktop client secret"],
                 ].map(([k, v]) => (
@@ -1738,6 +1858,7 @@ const routineActions = [
   ["trailer", "Vertical trailer"],
   ["notify", "Notify me"],
   ["approval", "Approval"],
+  ["upload", "Upload to YouTube"],
 ];
 function RoutineNode({ data, selected }: NodeProps) {
   return (
@@ -1805,6 +1926,41 @@ function RoutineOptions({
             placeholder="Your video is ready for review."
           />
         </label>
+      )}
+      {action === "upload" && (
+        <>
+          <p className="notice">
+            Requires an approved Approval node before this step. Resumes an
+            interrupted upload without duplicating it.
+          </p>
+          <label>
+            Privacy
+            <select
+              value={o.privacy || "private"}
+              onChange={(e) => set("privacy", e.target.value)}
+            >
+              {["private", "unlisted", "public"].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={!!o.kids}
+              onChange={(e) => set("kids", e.target.checked)}
+            />{" "}
+            Made for kids
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={!!o.synthetic}
+              onChange={(e) => set("synthetic", e.target.checked)}
+            />{" "}
+            Contains altered or synthetic media
+          </label>
+        </>
       )}
       {action === "trailer" && (
         <>
@@ -1910,6 +2066,9 @@ function RoutineOptions({
           >
             <option value="windows">Windows voice</option>
             <option value="elevenlabs">ElevenLabs</option>
+            <option value="fish">Fish Audio</option>
+            <option value="piper">Piper</option>
+            <option value="kokoro">Kokoro</option>
           </select>
         </label>
       )}
@@ -1993,6 +2152,9 @@ function RoutinePage({
     [projectId, setProjectId] = useState(""),
     [nodeAction, setNodeAction] = useState("script"),
     [agent, setAgent] = useState<any>({}),
+    [maxCost, setMaxCost] = useState(0),
+    [topicsPerRun, setTopicsPerRun] = useState(1),
+    [maxRunsPerDay, setMaxRunsPerDay] = useState(0),
     [schedule, setSchedule] = useState({ enabled: false, time: "09:00" }),
     [modal, setModal] = useState(false),
     [nodeId, setNodeId] = useState("");
@@ -2017,6 +2179,9 @@ function RoutinePage({
     setProjectId(r?.projectId || "");
     setSchedule(r?.schedule || { enabled: false, time: "09:00" });
     setAgent(r?.agent || {});
+    setMaxCost(r?.maxCost || 0);
+    setTopicsPerRun(r?.topicsPerRun || 1);
+    setMaxRunsPerDay(r?.maxRunsPerDay || 0);
   };
   useEffect(() => {
     if (state.routines.length && !selected) load(state.routines[0].id);
@@ -2031,6 +2196,9 @@ function RoutinePage({
           projectId,
           schedule,
           agent,
+          maxCost,
+          topicsPerRun,
+          maxRunsPerDay,
           nodes,
           edges,
         }),
@@ -2070,7 +2238,18 @@ function RoutinePage({
       new Blob(
         [
           JSON.stringify(
-            { name, topic, projectId, schedule, agent, nodes, edges },
+            {
+              name,
+              topic,
+              projectId,
+              schedule,
+              agent,
+              maxCost,
+              maxRunsPerDay,
+              topicsPerRun,
+              nodes,
+              edges,
+            },
             null,
             2,
           ),
@@ -2277,6 +2456,44 @@ function RoutinePage({
                 }
                 label="Routine model"
               />
+              <label>
+                Topics per run
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={topicsPerRun}
+                  onChange={(e) => setTopicsPerRun(Number(e.target.value))}
+                />
+              </label>
+              <p className="form-hint">
+                Each topic creates its own project and completes the workflow
+                with its own approval. Requires Topic finder and Create project
+                steps.
+              </p>
+              <label>
+                Daily run limit (0 = unlimited)
+                <input
+                  type="number"
+                  min="0"
+                  value={maxRunsPerDay}
+                  onChange={(e) => setMaxRunsPerDay(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                API-equivalent budget per run, USD (0 = unlimited)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={maxCost}
+                  onChange={(e) => setMaxCost(Number(e.target.value))}
+                />
+              </label>
+              <p className="form-hint">
+                Checked between steps. A provider call can cross the threshold.
+                Unpriced calls stop the next step for review.
+              </p>
               {nodeId && (
                 <div className="node-settings">
                   <h3>Selected step</h3>
@@ -2330,6 +2547,11 @@ function RoutinePage({
             setName(r.name || "Imported routine");
             setTopic(r.topic || "");
             setAgent(r.agent || {});
+            setProjectId(state.projects.some((p) => p.id === r.projectId) ? r.projectId : "");
+            setSchedule(r.schedule || { enabled: false, time: "09:00" });
+            setMaxCost(Number(r.maxCost) || 0);
+            setMaxRunsPerDay(Number(r.maxRunsPerDay) || 0);
+            setTopicsPerRun(Math.max(1, Math.min(10, Number(r.topicsPerRun) || 1)));
             setSelected("");
           } catch {
             notify("Invalid routine JSON");
