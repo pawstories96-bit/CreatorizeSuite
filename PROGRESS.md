@@ -2,13 +2,15 @@
 
 One local desktop application. No sample projects or seeded content.
 
-Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded build workflow does not override the user's request. The full brief is **not yet complete**. The application below is implemented; unfinished requirements are listed explicitly.
+Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded build workflow does not override the user's request. The full brief is **not yet complete**. The application below is implemented; unfinished requirements are listed explicitly.
 
 ## Implemented and exercised
 
 - One Electron application with original branding and an empty first launch. No example projects, seeded channels or simulated jobs.
 - Local project folders, SQLite index, real per-project Git commits, duplicate, recoverable deletion and ZIP import/export.
 - Official Codex CLI integration using its existing sign-in; configurable models and effort, normalized job events, token capture, role routing, encrypted API credentials. Live Codex tests passed.
+- Model pickers fetch actual catalogs through Codex app-server `model/list`, Claude's initialization protocol and configured compatible `/models` endpoints. Live local Codex and Claude discovery passed without starting inference. Friendly names, descriptions, supported efforts, refresh, search for large catalogs and optional custom IDs replace manual-only model fields in Connections, role routing and routines.
+- The editor has a project model selector in the agent status area above the composer. It saves a project-specific override without changing workspace defaults. Running and queued jobs snapshot their routing; changes apply to newly queued jobs. Browser and provider-protocol tests verified isolation, persistence and exact selected model IDs. Duplicate and ZIP round trips preserve the project choice.
 - The editor shows run duration, input/output tokens and project token totals. Optional user-entered API prices produce labeled estimates; subscription usage is not presented as an additional API charge.
 - Four-stage research, drafting, fact-checking and humanization. Research uses the official CLI's web tools and saves source URLs. Live seed-germination research test passed.
 - Windows speech synthesis, real SAPI word events, FFmpeg cleaning and imported audio transcription using faster-whisper. Real transcription test passed after bypassing an incompatible PyAV decoder API with FFmpeg.
@@ -43,6 +45,7 @@ Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded bu
 - Windows portable build produced an executable, but the first packaged export test failed because electron-builder excluded Three.js modules under its dependency's `examples` directory.
 - The build explicitly copies the required GLTF/Skeleton/geometry modules and their license into public runtime files. The latest unpacked Windows executable passed actual MP4 rendering through bundled Chromium/FFmpeg and real Windows TTS/audio processing, as well as empty startup and provider detection.
 - The packaged executable also passed a live signed-in Codex edit through the bundled MCP subprocess: candidate PNG rendering, preview checks and saved before/after captures. This verifies the actual Electron-as-Node bridge and packaged paths, not just the development server.
+- The packaged editor fetched the live catalog, saved a model selected through the project picker, and used that exact model ID for a real Codex edit. Provider switching also drives visual-review eligibility; unsupported Claude image review reports an error instead of claiming verification.
 - Repeated Git revert/undo and a real ZIP export/import round trip now pass. A timestamp rewrite after reverting had dirtied project.json; the index now loads the committed snapshot without rewriting it.
 
 ## Remaining brief requirements
@@ -78,6 +81,8 @@ Last updated: 2026-10-13. SPEC.md is the supplied product brief; its embedded bu
 `node tests/agent-tools.mjs` — actual stdio MCP, candidate images, layout, session isolation and compatible API tool-loop protocol. Set `LIVE_MCP=1` to also exercise signed-in Codex.
 
 `node tests/editing.mjs` — enforced object boundaries, browser range selection, actual before/after captures and source-file hot reload.
+
+`node tests/models.mjs` — live CLI model discovery, editor/Connections pickers, project isolation, ZIP persistence, and in-flight/queued job routing snapshots.
 
 `LIVE_PACKAGED_MCP=1` with `PACKAGED_EXE` set extends the desktop test with a live Codex MCP edit in the packaged application.
 

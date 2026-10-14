@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { run, uid, atomic } from "./core.mjs";
 import { agentTools } from "./agent-tools.mjs";
+import { resolveAgentRoute, snapshotAgentSettings } from "./agent-routing.mjs";
 
 export function extractJSON(text) {
   const clean = text
@@ -108,19 +109,25 @@ export class AgentRunner {
     );
   }
   async generate({ prompt, cwd, job, emit, role = "build", images = [] }) {
-    const s = this.store.settings();
-    const route = {
-      ...(s.roles?.[role] ||
-        (role === "research" ? s.roles?.script : null) ||
-        {}),
-      ...job.options?.agent,
-    };
-    const provider = route.provider || s.provider,
-      model = route.model || s.model;
+    job.agentSettingsSnapshot ||= snapshotAgentSettings(this.store.settings());
+    if (!Object.hasOwn(job, "projectAgentSnapshot"))
+      job.projectAgentSnapshot = job.projectId
+        ? this.store.get("projectAgents", job.projectId)?.agent || null
+        : null;
+    const s = { ...this.store.settings(), ...job.agentSettingsSnapshot };
+    const route = resolveAgentRoute(
+      s,
+      role,
+      job.projectAgentSnapshot,
+      job.options?.agent,
+    );
+    const { provider, model } = route;
     const previousUsage = { ...job.usage };
     const started = Date.now();
     job.usage = {};
     job.provider = provider;
+    job.model = model;
+    job.effort = route.effort;
     emit("info", `Using ${provider}${model ? " · " + model : ""}`);
     let text = "";
     if (provider === "local" || provider === "api") {
@@ -171,8 +178,7 @@ export class AgentRunner {
               ...(key ? { Authorization: `Bearer ${key}` } : {}),
             },
             body: JSON.stringify({
-              model:
-                route.model || (provider === "local" ? s.localModel : s.model),
+              model,
               messages,
               stream: false,
               ...(toolsEnabled
@@ -309,8 +315,12 @@ export class AgentRunner {
               "read-only",
               "--skip-git-repo-check",
               "--ephemeral",
-              "-c",
-              `model_reasoning_effort=${JSON.stringify(route.effort || s.effort || "medium")}`,
+              ...(route.effort
+                ? [
+                    "-c",
+                    `model_reasoning_effort=${JSON.stringify(route.effort)}`,
+                  ]
+                : []),
               ...(role === "research" ? ["-c", 'web_search="live"'] : []),
               ...(bridge
                 ? [
@@ -356,6 +366,7 @@ export class AgentRunner {
                   ]
                 : []),
               ...(model ? ["--model", model] : []),
+              ...(route.effort ? ["--effort", route.effort] : []),
             ];
       try {
         const result = await run(cliPath(provider), args, {

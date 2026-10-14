@@ -3282,3 +3282,90 @@ input[type="range"] {
   padding: 8px;
   color: #b9c6bf;
 }
+.model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.model-field > label {
+  margin: 0;
+}
+.model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.model-select-row select {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+}
+.model-description {
+  color: #b9c6bf;
+  line-height: 1.5;
+}
+.model-error {
+  color: #e7b790;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.model-custom-toggle {
+  font-size: 10px;
+  text-align: left;
+  align-self: flex-start;
+  opacity: 0.7;
+}
+.agent-model-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+}
+.agent-model-bar > span {
+  color: #a6b2ab;
+  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid #52675b;
+  border-radius: 8px;
+  color: #cde6d5;
+  background: #26362d;
+  font-size: 11px;
+  max-width: 210px;
+  flex-shrink: 0;
+}
+.model-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip:hover {
+  background: #344c3e;
+  border-color: #9dc7ac;
+}
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+.form-stack label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.form-stack select,
+.form-stack input {
+  width: 100%;
+}

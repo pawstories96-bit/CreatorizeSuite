@@ -134,6 +134,49 @@ try {
     const form = new FormData();
     form.append("file", new Blob([zip.toBuffer()]), "internal-check.zip");
     const p = await call("/import", form);
+    const catalog = await call("/models/codex");
+    assert.ok(catalog.models.length > 0);
+    await page
+      .locator(".sidebar")
+      .getByTitle("Projects", { exact: true })
+      .click();
+    await page.getByText(p.title, { exact: true }).first().click();
+    await page.getByRole("button", { name: "Change project model" }).click();
+    await page
+      .getByRole("combobox", { name: "Project provider", exact: true })
+      .selectOption("codex");
+    const modelSelect = page.getByRole("combobox", {
+      name: "Project model",
+      exact: true,
+    });
+    await modelSelect
+      .locator(`option[value="${catalog.models[0].id}"]`)
+      .waitFor({ state: "attached" });
+    await modelSelect.selectOption(catalog.models[0].id);
+    await page.getByRole("button", { name: "Use for this project" }).click();
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    assert.equal(
+      (await call(`/projects/${p.id}`)).agent.model,
+      catalog.models[0].id,
+    );
+    await page.waitForFunction(
+      (projectId) =>
+        document.querySelector("iframe")?.contentWindow.FC?.getProject()?.id ===
+        projectId,
+      p.id,
+    );
+    await page.waitForFunction(() => {
+      const canvas = document
+        .querySelector("iframe")
+        ?.contentDocument.querySelector("#stage");
+      if (!canvas) return false;
+      const pixel = canvas.getContext("2d").getImageData(640, 360, 1, 1).data;
+      return pixel[0] === 168 && pixel[1] === 212 && pixel[2] === 177;
+    });
+    await page.screenshot({ path: "test-results/packaged-project-model.png" });
+    console.log(
+      "PASS: packaged model discovery and editor model selection persist the actual provider model ID",
+    );
     const render = await wait(
       await call(`/projects/${p.id}/jobs`, {
         action: "export",
@@ -162,6 +205,7 @@ try {
         edit.events.some((e) => e.text === "Agent tool: check_preview"),
       );
       assert.equal(edit.comparisons.length, 1);
+      assert.equal(edit.model, catalog.models[0].id);
       console.log(
         "PASS: packaged signed-in Codex uses bundled MCP bridge, real preview tools, and before/after captures",
       );

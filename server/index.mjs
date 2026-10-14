@@ -19,7 +19,9 @@ import {
   topo,
   allowedLicense,
 } from "./core.mjs";
-import { AgentRunner, Vault } from "./agents.mjs";
+import { AgentRunner, Vault, cliPath } from "./agents.mjs";
+import { ModelCatalog } from "./model-catalog.mjs";
+import { normalizeAgent } from "./agent-routing.mjs";
 import { Pipeline } from "./pipeline.mjs";
 import { integrations } from "./integrations.mjs";
 import { assetRoutes } from "./assets.mjs";
@@ -41,6 +43,7 @@ export async function startServer(options = {}) {
     pipeline = new Pipeline(store, agents, vault);
   const agentTools = new AgentTools(store, pipeline);
   agents.toolBridge = agentTools;
+  const modelCatalog = new ModelCatalog(store, vault, cliPath);
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "25mb" }));
@@ -80,6 +83,10 @@ export async function startServer(options = {}) {
     res.json({
       projects: store
         .all("projects")
+        .map((p) => ({
+          ...p,
+          agent: store.get("projectAgents", p.id)?.agent || null,
+        }))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       jobs: store
         .all("jobs")
@@ -105,8 +112,25 @@ export async function startServer(options = {}) {
     }),
   );
   route("get", "/api/projects/:id", async (req, res) =>
-    res.json(store.project(req.params.id)),
+    res.json({
+      ...store.project(req.params.id),
+      agent: store.get("projectAgents", req.params.id)?.agent || null,
+    }),
   );
+  route("post", "/api/projects/:id/agent", async (req, res) => {
+    store.project(req.params.id);
+    const agent = normalizeAgent(req.body.agent);
+    store.put("projectAgents", { id: req.params.id, agent });
+    res.json({ agent });
+  });
+  route("get", "/api/models/:provider", async (req, res) => {
+    res.json(
+      await modelCatalog.list(req.params.provider, {
+        refresh: req.query.refresh === "true",
+        endpoint: req.query.endpoint,
+      }),
+    );
+  });
   route("post", "/api/projects", async (req, res) =>
     res.status(201).json(await store.create(req.body)),
   );
@@ -185,6 +209,9 @@ export async function startServer(options = {}) {
       status: original.shots.length ? "editing" : "draft",
     };
     store.saveProject(cloned);
+    const preference = store.get("projectAgents", original.id);
+    if (preference)
+      store.put("projectAgents", { id: p.id, agent: preference.agent });
     await store.commit(p.id, "Duplicate project");
     res.json(cloned);
   });
@@ -206,6 +233,16 @@ export async function startServer(options = {}) {
       store.projectDir(p.id),
       undefined,
       (f) => !f.includes(".git" + path.sep) && !f.startsWith(".git/"),
+    );
+    zip.updateFile(
+      "project.json",
+      Buffer.from(
+        JSON.stringify(
+          { ...p, agent: store.get("projectAgents", p.id)?.agent || null },
+          null,
+          2,
+        ),
+      ),
     );
     res.setHeader(
       "Content-Disposition",
@@ -247,6 +284,11 @@ export async function startServer(options = {}) {
         ...s,
         scene: s.scene ? validateScene(s.scene) : null,
       }));
+      if (imported.shots.some((s) => !/^[\w-]{1,100}$/.test(s.id)))
+        throw Error("Invalid shot ID in imported project");
+      const agent = normalizeAgent(imported.agent);
+      delete imported.agent;
+      store.put("projectAgents", { id: p.id, agent });
       if (imported.audio) safePath(dest, imported.audio);
       if (imported.mix) safePath(dest, imported.mix);
       if (imported.thumbnail) safePath(dest, imported.thumbnail);
@@ -691,6 +733,7 @@ export async function startServer(options = {}) {
     pipeline,
     vault,
     agentTools,
+    modelCatalog,
     sceneWatcher,
     url: base,
     close: async () => {

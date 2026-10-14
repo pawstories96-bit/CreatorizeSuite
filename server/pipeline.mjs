@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { chromium } from "playwright";
+import { snapshotAgentSettings, resolveAgentRoute } from "./agent-routing.mjs";
 import {
   uid,
   atomic,
@@ -73,6 +74,10 @@ export class Pipeline {
       projectId,
       action,
       options,
+      agentSettingsSnapshot: snapshotAgentSettings(this.store.settings()),
+      projectAgentSnapshot: projectId
+        ? this.store.get("projectAgents", projectId)?.agent || null
+        : null,
       status: "queued",
       progress: 0,
       events: [],
@@ -1024,8 +1029,13 @@ export class Pipeline {
     }
   }
   async visionQA(p, job, generate) {
-    const settings = this.store.settings(),
-      qaProvider = settings.roles?.qa?.provider || settings.provider;
+    const settings = job.agentSettingsSnapshot || this.store.settings(),
+      qaProvider = resolveAgentRoute(
+        settings,
+        "qa",
+        job.projectAgentSnapshot,
+        job.options?.agent,
+      ).provider;
     if (qaProvider === "claude") {
       this.emit(
         job,
@@ -1035,7 +1045,7 @@ export class Pipeline {
       p.visionQA = "unavailable";
       this.store.saveProject(p);
       throw Error(
-        "Visual verification did not run. Route QA to Codex or a compatible vision API in Connections, or select Standard quality.",
+        "Visual verification did not run. Choose Codex or a compatible vision API for this project, use workspace defaults with a QA override, or select Standard quality.",
       );
     }
     const browser = await this.browserInstance(),
@@ -1232,7 +1242,13 @@ export class Pipeline {
     return lines.join("\n");
   }
   async calibrate(job) {
-    const settings = this.store.settings();
+    const settings = job.agentSettingsSnapshot || this.store.settings();
+    const selected = resolveAgentRoute(
+      settings,
+      "test",
+      job.projectAgentSnapshot,
+      job.options?.agent,
+    );
     const generate = (prompt, images = []) =>
       this.agents.generate({
         prompt,
@@ -1260,7 +1276,7 @@ export class Pipeline {
     const qa = await this.verify(p, p.shots);
     if (qa.issues.length) throw Error(qa.issues.join("; "));
     let vision = false;
-    if (settings.provider !== "claude") {
+    if (selected.provider !== "claude") {
       this.update(
         job,
         60,
@@ -1293,9 +1309,9 @@ export class Pipeline {
       }
     }
     const result = {
-      id: `${settings.provider}:${settings.model || settings.localModel || "default"}`,
-      provider: settings.provider,
-      model: settings.model || settings.localModel || "default",
+      id: `${selected.provider}:${selected.model || "default"}`,
+      provider: selected.provider,
+      model: selected.model || "default",
       tier: vision ? "A" : "B",
       vision,
       structuredScenes: true,
@@ -1396,6 +1412,14 @@ export class Pipeline {
             parentId: job.id,
             projectId,
             action: type,
+            agentSettingsSnapshot:
+              job.agentSettingsSnapshot ||
+              snapshotAgentSettings(this.store.settings()),
+            projectAgentSnapshot: Object.hasOwn(job, "projectAgentSnapshot")
+              ? job.projectAgentSnapshot
+              : projectId
+                ? this.store.get("projectAgents", projectId)?.agent || null
+                : null,
             options: {
               ...node.data.options,
               agent: { ...routine.agent, ...node.data.options?.agent },

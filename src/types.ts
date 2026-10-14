@@ -37,6 +37,7 @@ export type Project = {
   metadata?: any;
   quality?: string;
   timingSource?: string;
+  agent?: { provider: string; model: string; effort: string } | null;
   needsReview?: boolean;
 };
 export type Job = {
@@ -63,6 +64,8 @@ export type Job = {
   size?: number;
   resolution?: string;
   provider?: string;
+  model?: string;
+  effort?: string;
   estimatedCost?: number;
   runs?: {
     provider: string;

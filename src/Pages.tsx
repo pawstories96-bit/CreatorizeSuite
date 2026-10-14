@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ThumbnailBoard } from "./ThumbnailBoard";
 import { AudienceLearning } from "./AudienceLearning";
+import { ModelSelect } from "./ModelSelect";
 import {
   Plus,
   Sparkles,
@@ -688,10 +689,14 @@ export function WorkspacePages({
                             api("/settings", "POST", {
                               ...settings,
                               provider: v.id,
+                              model: "",
+                              effort: "",
                             }),
                           "Provider selected",
                         );
                         set("provider", v.id);
+                        set("model", "");
+                        set("effort", "");
                       }}
                     >
                       {state.settings.provider === v.id ? (
@@ -716,8 +721,8 @@ export function WorkspacePages({
               <div>
                 <h2>Runtime preferences</h2>
                 <p>
-                  Model names are configurable. Leave a CLI model empty to use
-                  its own default.
+                  Pick from models returned by your connected provider. Refresh
+                  the list whenever your available models change.
                 </p>
               </div>
               <Button small primary onClick={saveSettings}>
@@ -730,7 +735,11 @@ export function WorkspacePages({
                 Active provider
                 <select
                   value={settings.provider || "codex"}
-                  onChange={(e) => set("provider", e.target.value)}
+                  onChange={(e) => {
+                    set("provider", e.target.value);
+                    set("model", "");
+                    set("effort", "");
+                  }}
                 >
                   <option value="codex">ChatGPT / Codex</option>
                   <option value="claude">Claude Code</option>
@@ -738,25 +747,29 @@ export function WorkspacePages({
                   <option value="api">OpenAI-compatible API</option>
                 </select>
               </label>
-              <label>
-                Model
-                <input
-                  value={settings.model || ""}
-                  onChange={(e) => set("model", e.target.value)}
-                  placeholder="Provider default"
-                />
-              </label>
-              <label>
-                Effort
-                <select
-                  value={settings.effort || "medium"}
-                  onChange={(e) => set("effort", e.target.value)}
-                >
-                  {["low", "medium", "high", "xhigh"].map((e) => (
-                    <option key={e}>{e}</option>
-                  ))}
-                </select>
-              </label>
+              <ModelSelect
+                provider={settings.provider || "codex"}
+                value={
+                  (settings.provider === "local"
+                    ? settings.localModel
+                    : settings.model) || ""
+                }
+                onChange={(value) =>
+                  set(
+                    settings.provider === "local" ? "localModel" : "model",
+                    value,
+                  )
+                }
+                endpoint={
+                  settings.provider === "local"
+                    ? settings.localUrl
+                    : settings.provider === "api"
+                      ? settings.apiUrl
+                      : undefined
+                }
+                effort={settings.effort || ""}
+                onEffortChange={(value) => set("effort", value)}
+              />
               <label>
                 Local endpoint
                 <input
@@ -765,14 +778,15 @@ export function WorkspacePages({
                   placeholder="http://127.0.0.1:11434/v1"
                 />
               </label>
-              <label>
-                Local model
-                <input
+              {settings.provider !== "local" && (
+                <ModelSelect
+                  provider="local"
                   value={settings.localModel || ""}
-                  onChange={(e) => set("localModel", e.target.value)}
-                  placeholder="Model installed on your server"
+                  onChange={(value) => set("localModel", value)}
+                  endpoint={settings.localUrl}
+                  label="Local model"
                 />
-              </label>
+              )}
               <label>
                 API base URL
                 <input
@@ -936,6 +950,7 @@ export function WorkspacePages({
                           [role]: {
                             ...settings.roles?.[role],
                             provider: e.target.value,
+                            model: "",
                           },
                         })
                       }
@@ -946,15 +961,20 @@ export function WorkspacePages({
                       <option value="local">Local</option>
                       <option value="api">API</option>
                     </select>
-                    <input
-                      placeholder="Default model"
+                    <ModelSelect
+                      provider={
+                        settings.roles?.[role]?.provider ||
+                        settings.provider ||
+                        "codex"
+                      }
+                      label={`${role === "qa" ? "QA" : role[0].toUpperCase() + role.slice(1)} model`}
                       value={settings.roles?.[role]?.model || ""}
-                      onChange={(e) =>
+                      onChange={(value) =>
                         set("roles", {
                           ...settings.roles,
                           [role]: {
                             ...settings.roles?.[role],
-                            model: e.target.value,
+                            model: value,
                           },
                         })
                       }
@@ -2230,7 +2250,12 @@ function RoutinePage({
                 <select
                   value={agent.provider || ""}
                   onChange={(e) =>
-                    setAgent({ ...agent, provider: e.target.value })
+                    setAgent({
+                      ...agent,
+                      provider: e.target.value,
+                      model: "",
+                      effort: "",
+                    })
                   }
                 >
                   <option value="">Same as Connections</option>
@@ -2240,30 +2265,18 @@ function RoutinePage({
                   <option value="api">Compatible API</option>
                 </select>
               </label>
-              <label>
-                Routine model
-                <input
-                  value={agent.model || ""}
-                  onChange={(e) =>
-                    setAgent({ ...agent, model: e.target.value })
-                  }
-                  placeholder="Provider default"
-                />
-              </label>
-              <label>
-                Routine effort
-                <select
-                  value={agent.effort || ""}
-                  onChange={(e) =>
-                    setAgent({ ...agent, effort: e.target.value })
-                  }
-                >
-                  <option value="">Same as Connections</option>
-                  {["low", "medium", "high", "xhigh"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </label>
+              <ModelSelect
+                provider={agent.provider || state.settings.provider || "codex"}
+                value={agent.model || ""}
+                onChange={(value) =>
+                  setAgent((a: any) => ({ ...a, model: value }))
+                }
+                effort={agent.effort || ""}
+                onEffortChange={(value) =>
+                  setAgent((a: any) => ({ ...a, effort: value }))
+                }
+                label="Routine model"
+              />
               {nodeId && (
                 <div className="node-settings">
                   <h3>Selected step</h3>

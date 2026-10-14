@@ -43,6 +43,7 @@ import {
 import { api, media, time, ago, type Project, type State } from "./types";
 import { Button, Modal, Badge, Busy, Empty } from "./ui";
 import Assets from "./Assets";
+import { ProjectModelPicker, providerNames } from "./ModelSelect";
 const stageInfo = [
   ["script", "Script written", FileText, "Open"],
   ["voiceover", "Voiceover added", AudioLines, "Add"],
@@ -115,11 +116,9 @@ export default function Editor({
     running = jobs.find((j) => ["running", "queued"].includes(j.status)),
     current = jobs[0];
   const provider =
-    state.settings.provider === "codex"
-      ? "ChatGPT / Codex"
-      : state.settings.provider === "claude"
-        ? "Claude"
-        : "Local / API";
+    providerNames[
+      running?.provider || p.agent?.provider || state.settings.provider
+    ] || "AI assistant";
   const post = (data: any) =>
     player.current?.contentWindow?.postMessage(data, location.origin);
   const seek = (t: number) => {
@@ -961,6 +960,20 @@ export default function Editor({
                     )}
                   </>
                 )}
+              </div>
+              <div className="agent-model-bar">
+                <span>
+                  {running
+                    ? `Working${running.model ? ` · ${running.model}` : ""}`
+                    : "Model for this project"}
+                </span>
+                <ProjectModelPicker
+                  project={p}
+                  state={state}
+                  refresh={refresh}
+                  notify={notify}
+                  running={!!running}
+                />
               </div>
               <div className="agent-composer">
                 {scope === "range" && range && (
