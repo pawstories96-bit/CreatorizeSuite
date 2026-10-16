@@ -96,6 +96,27 @@ try {
       }
       throw Error("Packaged job timeout");
     };
+    const fixtureCredential =
+      "internal-native-key-id:internal-native-key-secret";
+    await call("/credentials", {
+      name: "higgsfieldKey",
+      value: fixtureCredential,
+    });
+    assert.equal((await call("/state")).settings.vault.higgsfieldKey, true);
+    assert.ok(
+      !fs
+        .readFileSync(path.join(workspace, "vault", "higgsfieldKey"))
+        .includes(Buffer.from(fixtureCredential)),
+    );
+    assert.ok(
+      !fs
+        .readFileSync(path.join(workspace, "app.db"))
+        .includes(Buffer.from(fixtureCredential)),
+    );
+    await call("/credentials", { name: "higgsfieldKey", value: "" });
+    console.log(
+      "PASS: packaged provider credentials are OS-encrypted and absent from settings/project data",
+    );
     const zip = new AdmZip();
     zip.addFile(
       "project.json",
@@ -225,21 +246,38 @@ try {
         },
       ],
     });
+    await page.evaluate((base) => {
+      const iframe = document.createElement("iframe");
+      iframe.id = "packaged-graphics-check";
+      iframe.src = base + "/player.html?width=640&height=360&inspect=1";
+      iframe.style.cssText =
+        "position:fixed;inset:0;width:640px;height:360px;z-index:99999;border:0";
+      document.body.append(iframe);
+    }, base);
+    await page
+      .frameLocator("#packaged-graphics-check")
+      .locator("#stage")
+      .waitFor();
     const graphicsPage = page
       .frames()
-      .find((f) => f.url().includes("/player.html"));
+      .find((f) => f.url().includes("inspect=1"));
     assert.ok(graphicsPage);
     const graphicsErrors = [];
     const onGraphicsError = (e) => graphicsErrors.push(e.message);
     page.on("pageerror", onGraphicsError);
+    await graphicsPage.waitForFunction(() => window.ready);
     await graphicsPage.evaluate((p) => window.FC.setProject(p), graphics);
-    await graphicsPage.evaluate(() => window.FC.renderFrame(0.5));
+    const graphicsFrame = await graphicsPage.evaluate(() =>
+      window.FC.renderFrame(0.5),
+    );
+    assert.ok(graphicsFrame.metrics.some((m) => m.id === "rig" && m.bounds));
     await page
-      .locator("iframe")
-      .first()
+      .locator("#packaged-graphics-check")
       .screenshot({ path: "test-results/packaged-graphics.png" });
     assert.deepEqual(graphicsErrors, []);
-    await graphicsPage.evaluate((p) => window.FC.setProject(p), p);
+    await page
+      .locator("#packaged-graphics-check")
+      .evaluate((iframe) => iframe.remove());
     page.off("pageerror", onGraphicsError);
     console.log(
       "PASS: packaged Three.js add-ons render reflective water, articulated figures, tubes, SSAO, bloom, grain and outlines",

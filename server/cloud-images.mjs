@@ -177,10 +177,19 @@ export async function imageCatalog(
       provider,
       models: (data.models || []).map((m) => ({
         id: m.endpoint_id,
+        endpoint:
+          m.openapi?.info?.["x-fal-metadata"]?.endpointId || m.endpoint_id,
         name: m.metadata?.display_name || m.endpoint_id,
         description: m.metadata?.description || "",
         category: m.metadata?.category,
-        ...(m.openapi ? { schema: inputSchema(m.openapi, m.endpoint_id) } : {}),
+        ...(m.openapi
+          ? {
+              schema: inputSchema(
+                m.openapi,
+                m.openapi.info?.["x-fal-metadata"]?.endpointId || m.endpoint_id,
+              ),
+            }
+          : {}),
       })),
       nextCursor: data.has_more ? data.next_cursor : null,
       source: "Live fal model catalog",
@@ -377,9 +386,13 @@ export async function generateCloudImage({
     ? AbortSignal.any([signal, AbortSignal.timeout(600000)])
     : AbortSignal.timeout(600000);
   const catalog = await imageCatalog(provider, { model, fetcher }),
-    schema = catalog.models.find((m) => m.id === model)?.schema;
+    selected = catalog.models.find((m) => m.id === model),
+    schema = selected?.schema,
+    endpointModel = selected?.endpoint || model;
   if (!schema)
     throw Error("Selected model is absent from the provider's live schema");
+  if (!/^[\w.-]+(?:\/[\w.-]+)+$/.test(endpointModel))
+    throw Error("Provider schema returned an invalid model endpoint");
   // Validate capabilities before uploading any reference media.
   const parameters = settings[provider + "Parameters"] || {};
   imageInput(schema, {
@@ -450,7 +463,7 @@ export async function generateCloudImage({
       parameters,
     });
     const submitted = await json(
-      origins[provider] + "/" + model,
+      origins[provider] + "/" + endpointModel,
       { key, method: "POST", body: JSON.stringify(input), signal },
       fetcher,
     );

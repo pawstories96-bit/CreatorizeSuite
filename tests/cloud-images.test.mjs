@@ -69,6 +69,22 @@ test("image models come from live schemas; invalid parameters and incompatible r
     /unexpected request origin/,
   );
 });
+test("fal catalog aliases use the canonical endpoint advertised by their schema", async () => {
+  const aliasDoc = {
+    ...doc,
+    info: { "x-fal-metadata": { endpointId: "test/image" } },
+  };
+  const result = await imageCatalog("fal", {
+    model: "brand/new-image",
+    fetcher: async () =>
+      response({
+        models: [{ endpoint_id: "brand/new-image", openapi: aliasDoc }],
+      }),
+  });
+  assert.equal(result.models[0].id, "brand/new-image");
+  assert.equal(result.models[0].endpoint, "test/image");
+  assert.equal(result.models[0].schema.properties.prompt.minLength, 3);
+});
 test("fal resumes a pending paid request, downloads an actual image, and keeps credentials off the media request", async () => {
   const store = await new Store().init(
       path.resolve(".test-cloud-fal-" + uid()),

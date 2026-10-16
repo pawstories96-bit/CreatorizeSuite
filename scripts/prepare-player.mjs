@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import "./license-notices.mjs";
 // electron-builder excludes dependency directories named "examples". These
 // three runtime modules are required by our GLB renderer, so bundle explicitly.
 const copied = new Set();

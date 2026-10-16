@@ -1,6 +1,16 @@
 # Creatorize Suite
 
-Updated 2026-10-16. One application, no seeded projects. The revised brief is still in progress. The current implementation and remaining work are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md). Version 0.3 source builds successfully; packaged verification is still pending. The earlier checkpoint below records historical validation and does not certify the new build or every external integration.
+Updated 2026-10-16. One application, no seeded projects. The revised brief is still in progress. Current implementation and remaining gaps are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+
+Version 0.3 builds successfully. The actual Windows unpacked app passed empty startup, sandbox/context isolation, encrypted credentials, live model discovery/project selection, real MP4 export, Windows speech/audio processing and a dedicated Three.js effects capture. A signed-in Codex edit used the packaged scoped MCP bridge, candidate-frame/preview tools and actual before/after PNG and MP4 captures. The single-file portable build passed extraction, startup, empty project/channel/routine/thumbnail lists, the Usage screen and bundled interface/font notice checks.
+
+Launch `release/v0.3.0/Creatorize Suite 0.3.0.exe` or `Launch Creatorize.cmd`. The portable file is 302,800,017 bytes; SHA-256 `6B47302AB03C909A874B536DEF45E7AC6A439DA3E8023D2201DBEC5CACC69D08`. The user's running application and workspace were not restarted or replaced by these tests.
+
+New checks also passed for live CC0 textured-model retrieval, OSM/DEM geometry, camera/audio synchronization, repeated-take review, reference ranges, custom styles, characters, fourteen-node real-media autopilot, image-provider catalogs/protocols and desktop-session restoration. The 30-second 1080p/60-fps render produced all 1,800 frames and synchronized audio. Direct canvas capture reduced the local run from 665.7 to 316.7 seconds, with identical MP4 SHA-256 hashes. This does not establish long-documentary performance or live validation of unconfigured paid services.
+
+Native Anthropic/fal/Higgsfield generation and authenticated Google Flow still need validation with configured accounts. The Flow browser bridge passed an isolated browser-control fixture; its live signed-in layout is not certified. Dedicated Poly Pizza/Sketchfab OAuth and Mapbox adapters remain unimplemented. Actual working sources include Poly Haven CC0, local GLB/rig import and OSM/DEM.
+
+The earlier record below is historical and does not certify every revised requirement.
 
 ## Earlier implementation record
 

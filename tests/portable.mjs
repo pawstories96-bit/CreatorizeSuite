@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { atomic, uid } from "../server/core.mjs";
@@ -9,11 +10,14 @@ const reservation = net.createServer();
 await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
 const port = reservation.address().port;
 await new Promise((resolve) => reservation.close(resolve));
-const executable = path.resolve(process.env.PACKAGED_EXE || "release/v0.3.0/Creatorize Suite 0.3.0.exe");
+const executable = path.resolve(
+  process.env.PACKAGED_EXE || "release/v0.3.0/Creatorize Suite 0.3.0.exe",
+);
 const child = spawn(
   executable,
   [
     `--remote-debugging-port=${port}`,
+    "--enable-automation",
     `--user-data-dir=${path.join(root, "profile")}`,
   ],
   {
@@ -50,6 +54,23 @@ try {
     fetch("/api/state").then((r) => r.json()),
   );
   assert.equal(state.projects.length, 0);
+  assert.equal(state.channels.length, 0);
+  assert.equal(state.routines.length, 0);
+  assert.equal(state.thumbnails.length, 0);
+  const browserSession = await browser.newBrowserCDPSession();
+  const commandLine = await browserSession.send(
+    "Browser.getBrowserCommandLine",
+  );
+  const resources = path.join(
+    path.dirname(commandLine.arguments[0]),
+    "resources",
+  );
+  assert.ok(
+    fs.existsSync(
+      path.join(resources, "licenses", "@fontsource-variable-dm-sans.txt"),
+    ),
+  );
+  assert.ok(fs.existsSync(path.join(resources, "licenses", "next.txt")));
   await page.locator(".sidebar").getByTitle("Usage", { exact: true }).click();
   await page.getByRole("heading", { name: "Usage & costs" }).waitFor();
   await page.screenshot({ path: "test-results/portable.png" });
