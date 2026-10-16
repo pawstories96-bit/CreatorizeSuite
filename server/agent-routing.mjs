@@ -1,4 +1,4 @@
-export const providers = ["codex", "claude", "local", "api"];
+export const providers = ["codex", "claude", "anthropic", "local", "api"];
 export function snapshotAgentSettings(settings) {
   return structuredClone({
     provider: settings.provider || "codex",
@@ -8,7 +8,22 @@ export function snapshotAgentSettings(settings) {
     roles: settings.roles || {},
     fallbacks: settings.fallbacks || {},
     enableFallbacks: settings.enableFallbacks === true,
+    liteMode: settings.liteMode === true,
   });
+}
+export function capabilityFor(settings, route, calibrations = []) {
+  const calibration = calibrations.find(
+    (c) =>
+      c.provider === route.provider && c.model === (route.model || "default"),
+  );
+  return {
+    tier: calibration?.tier || null,
+    vision: calibration?.vision === true,
+    lite:
+      settings.liteMode === true ||
+      calibration?.tier === "C" ||
+      (!calibration && route.provider === "local"),
+  };
 }
 export function normalizeAgent(value) {
   if (value == null) return null;

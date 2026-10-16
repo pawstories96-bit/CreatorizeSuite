@@ -124,12 +124,26 @@ try {
   await page
     .getByRole("heading", { name: "Before / After", exact: true })
     .waitFor();
-  const imgs = page.locator(".comparison-pair img");
-  assert.equal(await imgs.count(), 4);
+  const videos = page.locator(".comparison-pair video");
+  assert.equal(await videos.count(), 4);
   await page.waitForFunction(() =>
-    [...document.querySelectorAll(".comparison-pair img")].every(
-      (img) => img.complete && img.naturalWidth > 0,
+    [...document.querySelectorAll(".comparison-pair video")].every(
+      (video) => video.readyState >= 1 && video.videoWidth > 0,
     ),
+  );
+  assert.ok(
+    (await service.pipeline.duration(
+      path.join(service.store.projectDir(p.id), edit.comparisons[0].beforeClip),
+    )) > 1.5,
+  );
+  await page
+    .getByRole("button", { name: "Play both motion previews" })
+    .first()
+    .click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".comparison-pair video")]
+      .slice(0, 2)
+      .every((v) => v.currentTime > 0.1),
   );
   await page.screenshot({ path: "test-results/edit-comparison.png" });
   assert.deepEqual(errors, []);
@@ -140,7 +154,7 @@ try {
     checkedAt: new Date().toISOString(),
   });
   console.log(
-    "PASS: Shift-drag UI range edits only overlapping shots; before/after modal loads all captured frames",
+    "PASS: Shift-drag edits only overlapping shots; before/after MP4s decode and play together in the comparison panel",
   );
   await page.getByRole("button", { name: "Close dialog" }).click();
   const sourceFile = path.join(

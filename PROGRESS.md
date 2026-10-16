@@ -1,4 +1,9 @@
-# Framecraft Studio
+# Creatorize Suite
+
+Updated 2026-10-16. One application, no seeded projects. The revised brief is still in progress. The current implementation and remaining work are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md). Version 0.3 source builds successfully; packaged verification is still pending. The earlier checkpoint below records historical validation and does not certify the new build or every external integration.
+
+## Earlier implementation record
+
 
 One local desktop application. No sample projects or seeded content.
 
@@ -12,6 +17,9 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 - Expanded MCP tools for public source discovery/retrieval, licensed image/footage search/download, loudness measurement, staged sound tracks and storyboard titles, and memory proposals requiring approval. Tests verified scope restrictions, staging and approval. A configured SearXNG endpoint enables general search; the default search tool uses Wikipedia source discovery, with direct retrieval for public primary sources.
 - Thumbnail reference analysis, saved channel style keys, multiple candidates per prompt, and parent-linked regeneration history. These inference flows require a working configured provider; the local canvas persistence and protocol tests passed.
 - Routine upload nodes after approval, checkpointed multi-topic branches, daily run limits and budget checks between steps. Restart/approval/budget tests passed. A single provider call may exceed a cost threshold; unknown-priced attempts pause budget-limited runs. JSON import/export preserves batch and limit settings.
+- Reusable declarative characters, trees, buildings, arrows, ships and bridges compile to editable elements. Added animated limbs, sparse keyframes, orbit/dolly cameras, configurable 3D lighting and shadows. Actual-frame tests verify interpolation and deterministic backward seeking. These are basic components, not detailed historical reconstructions.
+- Inspection passes now measure 3D screen bounds and sampled raycast visibility, and flag marked grounded objects and collision-group bounding-volume overlaps. Essential subjects are checked for framing. These conservative checks supplement visual review; they do not prove exact mesh collision or complete visibility.
+- Capability badges and Lite-mode guidance appear next to the project model controls. Tier C and uncalibrated local models use simpler per-shot prompts, component support and a 40-element limit for new scenes. Existing edits preserve unrelated objects. Workspace routing presets support Codex, Claude, hybrid and local-only configurations.
 
 - One Electron application with original branding and an empty first launch. No example projects, seeded channels or simulated jobs.
 - Local project folders, SQLite index, real per-project Git commits, duplicate, recoverable deletion and ZIP import/export.
@@ -25,11 +33,11 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 - Local images, MP4 video and embedded GLB models with deterministic animation. Forward/backward frame hash test passed. Imported assets have attribution records.
 - Real AI shot generation, scoped edits, Git history and reversible changes. Live Codex scene, edit and MP4 export test passed.
 - Job-scoped MCP bridge for official CLIs: project/storyboard/word/asset reads, candidate frame images, programmatic preview checks and layout measurement. Live Codex invoked the bridge, understood the returned PNG and completed a real scene build/edit/export. Compatible API/local models have a bounded function-calling loop over the same tools; protocol tests passed with actual rendered PNGs and cumulative token accounting. Live external API/local models remain unverified.
-- Shift-drag time-range selection applies edits to the whole shots overlapping that range. Object selection edits enforce preservation of other elements and scene settings. Actual before/after PNGs appear in the result and Git History. Browser tests exercised the complete edit flow.
+- Shift-drag time-range selection applies edits to the whole shots overlapping that range. Object selection edits enforce preservation of other elements and scene settings. Actual before/after PNGs and short silent MP4 motion previews appear in the result and Git History; Play both starts the paired clips together. Browser tests verified actual decoded playback and the complete edit flow.
 - External edits to canonical scene JSON are validated, checked in the renderer, hot-reloaded into the live player and committed. Invalid edits preserve the last valid preview. Actual file-edit/reload tests passed.
-- Layout measurements report rotated 2D/text bounds, off-screen objects and candidate text overlaps. Long unbroken labels are measured against available width. Path bounds and 3D occlusion remain outside these checks.
+- Layout measurements report rotated 2D/text bounds, off-screen objects and candidate text overlaps. Long unbroken labels are measured against available width. 3D inspection adds projected bounds and sampled raycast visibility; path bounds remain outside these checks.
 - Programmatic blank-frame and text-fit checks. Codex visual review of rendered start/middle/end images, with repair loops. Live scene generation and image-understanding calibration passed. Compatible vision APIs can receive image inputs, but have not been live-tested.
-- Real MP4 rendering with Chromium frame stepping and FFmpeg, captions in SRT, 720p/1080p/4K and vertical export options. Automated export tests currently exercise small/720p outputs, not long 4K renders.
+- Real MP4 rendering with Chromium frame stepping and FFmpeg, captions in SRT, 720p/1080p/4K and vertical export options. A real 3840×2160 H.264 test passed with 36 frames at 24 fps, camera motion, 3D lighting/shadows and text overlays. It took 41.4 seconds on this machine; this short check does not establish long-video performance.
 - Procedural ambience or imported music/ambience, looping, automatic narration ducking, loudness normalization. Actual imported audio mix test passed.
 - Thumbnail capture/import/library/assignment and a saved infinite canvas with image, prompt and text nodes. Connected image references are passed to an explicitly configured image-edit endpoint. Canvas reload test passed.
 - Style presets and user-authored style instructions, memory rules, channels and workflow organization.
@@ -52,6 +60,7 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 ## Packaging verification
 
 - October 14 feature build: 19 core tests and browser/media/timeline/adapter/model/MCP regressions passed. The new unpacked executable passed empty startup, native isolation, live model selection, MP4 export, Windows TTS and audio processing. A live Codex MCP edit first hit HTTP 503, then passed on retry with real candidate frames, preview checks and before/after captures. External provider availability remains outside the application.
+- The intermediate 0.1 feature build's single-file portable executable passed actual extraction/startup, empty workspace and Usage navigation using a browser debugging connection. Direct Playwright Electron launch cannot use its inherited debug pipe through the NSIS wrapper; `tests/portable.mjs` covers that wrapper separately. The user's running app was not automatically restarted because automatic approval review rejected that action.
 
 - Windows portable build produced an executable, but the first packaged export test failed because electron-builder excluded Three.js modules under its dependency's `examples` directory.
 - The build explicitly copies the required GLTF/Skeleton/geometry modules and their license into public runtime files. The latest unpacked Windows executable passed actual MP4 rendering through bundled Chromium/FFmpeg and real Windows TTS/audio processing, as well as empty startup and provider detection.
@@ -61,9 +70,9 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 
 ## Remaining brief requirements
 
-- Reliable Tier C adaptation and wider live provider calibration. Claude image input is implemented but not live-validated. The expanded MCP catalog still lacks model/map retrieval and storyboard timing mutation.
-- Rich style-specific character/rig kits, advanced 3D camera/lighting/collision/occlusion checks, real maps, automatic real-footage sourcing and style training from reference videos. The current renderer uses validated declarative scenes, not unrestricted arbitrary scene code.
-- Range editing currently changes whole intersecting shots, and before/after comparisons use still frames rather than clips.
+- Wider live provider calibration and validation with genuinely weak local models. Lite adaptation is implemented, but no local inference server is installed here. Claude image input is implemented but not live-validated. The expanded MCP catalog still lacks model/map retrieval and storyboard timing mutation.
+- Detailed style-specific rigs beyond the basic reusable components, real maps, automatic real-footage placement and style training from reference videos. Geometry checks use bounding volumes and sampled rays, not exact mesh intersection. The current renderer uses validated declarative scenes, not unrestricted arbitrary scene code.
+- Range editing currently changes whole intersecting shots. Before/after clips are short, silent motion previews rather than full-shot audio comparisons.
 - Additional validated speech languages and live validation of the newly added speech/image adapters. Windows voice coverage depends on installed OS voices.
 - Per-prompt thumbnail aspect ratio/resolution and image generation cost accounting.
 - Channel catalog scraping and concurrent routine branches. Multi-topic routines currently run independent branches sequentially, with durable checkpoints and separate approvals.
@@ -77,6 +86,10 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 
 `node tests/timeline.mjs` — browser timeline persistence, cue/card rendering and real audio trim/fade/duck/loudness checks.
 
+`node tests/scenes.mjs` — component expansion, deterministic keyframes/cameras, real 3D bounds/raycast/ground/collision detection and editor capability guidance.
+
+`node tests/render-4k.mjs` — actual 4K H.264 render with FFprobe verification of dimensions, frame rate and decoded frame count. This is a short render check, not a long-video benchmark.
+
 `node tests/adapters.mjs` — ComfyUI/Kokoro HTTP protocol, real WAV decoding and private-network research protection. This is protocol validation, not live model inference.
 
 `npm run test:e2e` — real browser interaction, voice generation, audio playback, export, persistence, every screen and origin protection.
@@ -84,6 +97,8 @@ Last updated: 2026-10-14. SPEC.md is the supplied product brief; its embedded bu
 `npm run test:media` — actual video/GLB frame rendering, deterministic seeking and canvas persistence.
 
 `npm run test:desktop` — native Electron window and security settings.
+
+`node tests/portable.mjs` — real single-file executable extraction/startup in an isolated workspace, connected through its browser debugging endpoint.
 
 `node tests/calibration.mjs` — live provider calibration plus real audio mixing.
 

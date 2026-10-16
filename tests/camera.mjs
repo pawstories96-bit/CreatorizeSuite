@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { chromium } from "playwright";
+import { startServer } from "../server/index.mjs";
+import { uid, run, atomic } from "../server/core.mjs";
+const service = await startServer({ root: path.resolve(".test-camera-" + uid()), port: 0 });
+let browser;
+const call = async (url, method = "GET", data) => {
+  const r = await fetch(service.url + "/api" + url, { method, headers: { Origin: service.url, ...(data instanceof FormData ? {} : { "Content-Type": "application/json" }) }, body: data ? data instanceof FormData ? data : JSON.stringify(data) : undefined });
+  const result = await r.json(); if (!r.ok) throw Error(result.error); return result;
+};
+const wait = async id => { for (let i = 0; i < 1200; i++) { const j = service.store.get("jobs", id); if (j.status === "done") return j; if (["error", "paused", "stopped"].includes(j.status)) throw Error(j.error); await new Promise(r => setTimeout(r, 500)); } throw Error("Camera task timed out"); };
+try {
+  service.store.put("settings", { id: "app", whisperModel: "tiny", whisperDevice: "auto" });
+  const p = await service.store.create({ title: "Internal camera sync verification", script: "Every camera recording needs clear timing. We keep the words and remove only quiet pauses." });
+  await wait(service.pipeline.enqueue(p.id, "tts", { provider: "windows" }).id);
+  const first = service.store.project(p.id), dir = service.store.projectDir(p.id), length = first.durationSec * 2 + 1;
+  const source = path.join(dir, "assets", "input-camera.mp4");
+  await run("ffmpeg", ["-y", "-i", path.join(dir, first.audio), "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12", "-filter_complex", "[0:a]asplit[a0][a1];[a0]apad=pad_dur=1[pad];[pad][a1]concat=n=2:v=0:a=1[speech]", "-map", "1:v:0", "-map", "[speech]", "-t", String(length), "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", source]);
+  const form = new FormData(); form.append("file", new Blob([fs.readFileSync(source)], { type: "video/mp4" }), "camera.mp4");
+  const preparedJob = await call(`/projects/${p.id}/camera`, "POST", form); await wait(preparedJob.id);
+  const prepared = service.store.project(p.id);
+  assert.equal(prepared.style, "talking"); assert.ok(prepared.sourceVideo); assert.ok(prepared.words.length > 20);
+  assert.ok(Math.abs(prepared.durationSec - length) < 0.1, "Camera audio must not be replaced with an earlier voiceover");
+  assert.ok(fs.existsSync(path.join(dir, "audio", "script_timed.srt")));
+  assert.ok(prepared.shots.every(s => s.scene));
+  console.log("PASS: actual camera upload, video normalization, original audio extraction/cleaning, local Whisper and timed transcript");
+  const analysis = await call(`/projects/${p.id}/silence/analyze`, "POST", { minPause: 0.25 }); assert.ok(analysis.pauses.length);
+  await wait((await call(`/projects/${p.id}/jobs`, "POST", { action: "trim", options: { analysisId: analysis.id, reduction: 80 } })).id);
+  const trimmed = service.store.project(p.id); assert.ok(trimmed.durationSec < prepared.durationSec - 0.3); assert.ok(trimmed.cameraCuts.length > 1);
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
+  await page.goto(service.url + "/player.html?width=640&height=360"); await page.waitForFunction(() => window.ready);
+  const cut = trimmed.cameraCuts[1], offset = Math.min(0.2, (cut.outputEnd - cut.outputStart) / 2);
+  const hash = async () => crypto.createHash("sha256").update(await page.locator("#stage").screenshot()).digest("hex");
+  await page.evaluate(p => window.FC.setProject(p), trimmed); await page.evaluate(t => window.FC.renderFrame(t), cut.outputStart + offset); const after = await hash();
+  await page.evaluate(p => window.FC.setProject(p), prepared); await page.evaluate(t => window.FC.renderFrame(t), cut.sourceStart + offset); assert.equal(await hash(), after);
+  await wait((await call(`/projects/${p.id}/jobs`, "POST", { action: "export", options: { resolution: "test", fps: 4 } })).id);
+  const exported = service.store.project(p.id); assert.ok(exported.lastExport);
+  atomic("test-results/camera-results.json", { passed: true, originalDuration: prepared.durationSec, trimmedDuration: trimmed.durationSec, words: trimmed.words.length, checkedAt: new Date().toISOString() });
+  console.log("PASS: pause cuts preserve exact camera source frames and synchronized audio; hybrid footage exports to a real MP4");
+} finally { await browser?.close(); await service.close(); }

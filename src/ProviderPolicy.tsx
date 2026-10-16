@@ -25,6 +25,53 @@ export function ProviderPolicy({
           </p>
         </div>
       </div>
+      <h3>Workspace routing presets</h3>
+      <div className="row">
+        {[
+          ["All Codex", "codex"],
+          ["All Claude", "claude"],
+          ["Hybrid", "hybrid"],
+          ["Local only", "local"],
+        ].map(([label, preset]) => (
+          <Button
+            key={preset}
+            small
+            onClick={() => {
+              const provider = preset === "hybrid" ? "codex" : preset;
+              set("provider", provider);
+              set("model", "");
+              set(
+                "roles",
+                preset === "hybrid"
+                  ? {
+                      build: { provider: "claude", model: "", effort: "" },
+                      edit: { provider: "claude", model: "", effort: "" },
+                      qa: { provider: "codex", model: "", effort: "" },
+                    }
+                  : {},
+              );
+              set("enableFallbacks", false);
+              set("liteMode", preset === "local");
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      <p className="form-hint">
+        Save Connections to apply a preset. Local only uses your selected local
+        model and requires its server to be running. Project-specific model
+        choices take priority.
+      </p>
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={!!settings.liteMode}
+          onChange={(e) => set("liteMode", e.target.checked)}
+        />
+        Prefer Lite mode: simpler scenes for smaller models. Uncalibrated local
+        models and Tier C models use this automatically.
+      </label>
       <label className="checkbox">
         <input
           type="checkbox"

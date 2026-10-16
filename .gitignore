@@ -1,5 +1,9 @@
 node_modules/
 dist/
+out/
+.next/
+next-env.d.ts
+*.tsbuildinfo
 release/
 .workspace/
 .test-*/

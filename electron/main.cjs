@@ -24,8 +24,9 @@ app.whenReady().then(async () => {
   const { startServer } = await import("../server/index.mjs");
   service = await startServer({
     root:
+      process.env.CREATORIZE_WORKSPACE ||
       process.env.FRAMECRAFT_WORKSPACE ||
-      path.join(app.getPath("documents"), "Framecraft Workspace"),
+      path.join(app.getPath("documents"), fs.existsSync(path.join(app.getPath("documents"), "Framecraft Workspace")) ? "Framecraft Workspace" : "Creatorize Workspace"),
     port: 0,
     safeStorage,
     openPath: (p) => shell.openPath(p),
@@ -36,7 +37,7 @@ app.whenReady().then(async () => {
     height: 960,
     minWidth: 1100,
     minHeight: 740,
-    title: "Framecraft Studio",
+    title: "Creatorize Suite",
     icon,
     backgroundColor: "#151616",
     autoHideMenuBar: true,
@@ -57,14 +58,14 @@ app.whenReady().then(async () => {
   tray = new Tray(
     nativeImage.createFromPath(icon).resize({ width: 24, height: 24 }),
   );
-  tray.setToolTip("Framecraft Studio");
+  tray.setToolTip("Creatorize Suite");
   const show = () => {
     win.show();
     win.focus();
   };
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Open Framecraft Studio", click: show },
+      { label: "Open Creatorize Suite", click: show },
       { label: "Quit", click: () => app.quit() },
     ]),
   );
@@ -86,12 +87,12 @@ app.whenReady().then(async () => {
     }
     for (const j of service.store.all("jobs")) {
       if (
-        (settings.notifications || j.action === "notify") &&
+        (settings.notifications || j.action === "notify" || j.notification) &&
         seen.get(j.id) !== j.status &&
         ["done", "error", "waiting"].includes(j.status)
       )
         new Notification({
-          title: "Framecraft Studio",
+          title: "Creatorize Suite",
           body:
             j.notification ||
             `${j.action}: ${j.status}${j.error ? " — " + j.error.slice(0, 150) : ""}`,

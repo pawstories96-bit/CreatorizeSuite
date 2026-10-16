@@ -4,7 +4,9 @@ import crypto from "node:crypto";
 import { uid, atomic, read, safePath } from "./core.mjs";
 import { transferUpload, cancelUploads } from "./youtube-upload.mjs";
 import { audienceRoutes } from "./audience.mjs";
-import { comfyModels, generateComfy } from "./comfy.mjs";
+import { comfyModels } from "./comfy.mjs";
+import { generateImage } from "./image-generation.mjs";
+import { descriptionWithCredits } from "./metadata.mjs";
 export function integrations(app, { store, vault, getBase, pipeline }) {
   const route = (method, url, fn) =>
     app[method](url, async (req, res, next) => {
@@ -225,17 +227,10 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
       path.join(store.projectDir(p.id), "assets", "ATTRIBUTIONS.json"),
       [],
     );
-    const attribution = ledger
-      .filter((a) => a.source !== "Local import")
-      .map((a) => `${a.name} — ${a.author} (${a.license}) ${a.source}`)
-      .join("\n");
     const metadata = {
       snippet: {
         title: String(req.body.title || p.title).slice(0, 100),
-        description: (
-          String(req.body.description || "") +
-          (attribution ? "\n\nCredits\n" + attribution : "")
-        ).slice(0, 5000),
+        description: descriptionWithCredits(req.body.description, ledger),
         tags: p.metadata?.tags || [],
         categoryId: "27",
         defaultLanguage: p.language,
@@ -291,7 +286,11 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
   }
   async function finishUpload(p, record, result) {
     p.youtubeVideoId = result.id;
-    p.status = "published";
+    p.status =
+      record.publishAt && Date.parse(record.publishAt) > Date.now()
+        ? "scheduled"
+        : "published";
+    p.kanbanStage = p.status;
     p.publishAt = record.publishAt;
     store.saveProject(p);
     record.status = "done";
@@ -338,129 +337,16 @@ export function integrations(app, { store, vault, getBase, pipeline }) {
     res.json(p);
   });
   route("post", "/api/thumbnails/generate", async (req, res) => {
-    const p = store.project(req.body.projectId),
-      s = store.settings(),
-      key = (await vault.get("imageKey")) || (await vault.get("apiKey"));
-    if (s.imageProvider === "comfy") {
-      const refs = (req.body.references || []).map((ref) => {
-        const file = safePath(store.projectDir(ref.projectId), ref.path);
-        if (!/\.(png|jpe?g|webp)$/i.test(file))
-          throw Error("Use image references");
-        return { bytes: fs.readFileSync(file), mime: /\.webp$/i.test(file) ? "image/webp" : /\.jpe?g$/i.test(file) ? "image/jpeg" : "image/png" };
-      });
-      const channel = store.get("channels", p.channelId);
-      const result = await generateComfy({
-        settings: s,
-        prompt: [req.body.prompt, channel?.thumbnailStyleKey]
-          .filter(Boolean)
-          .join("\n"),
-        references: refs,
-      });
-      const rel = `assets/thumbnail-${uid()}.png`;
-      atomic(path.join(store.projectDir(p.id), rel), result.bytes);
-      const record = store.put("thumbnails", {
-        id: uid(),
-        name: p.title,
-        projectId: p.id,
-        path: rel,
+    res.json(
+      await generateImage({
+        store,
+        vault,
+        project: store.project(req.body.projectId),
         prompt: req.body.prompt,
-        provider: "comfy",
-        model: result.model,
-        seed: result.seed,
-        promptId: result.promptId,
+        references: req.body.references || [],
         parentId: req.body.parentId || null,
-        createdAt: new Date().toISOString(),
-      });
-      res.json(record);
-      return;
-    }
-    if (!key) throw Error("Add an image provider key in Connections");
-    if (!s.imageModel || !s.imageUrl)
-      throw Error("Set your image generation model and endpoint in Settings");
-    const references = req.body.references || [];
-    const channel = store.get("channels", p.channelId);
-    const prompt = [String(req.body.prompt || ""), channel?.thumbnailStyleKey]
-      .filter(Boolean)
-      .join("\n");
-    if (!Array.isArray(references) || references.length > 8)
-      throw Error("Use up to eight image references");
-    let body,
-      endpoint = s.imageUrl,
-      headers = { Authorization: `Bearer ${key}` };
-    if (references.length) {
-      if (!s.imageEditUrl)
-        throw Error(
-          "Set the image edit endpoint in Settings to generate with reference images",
-        );
-      endpoint = s.imageEditUrl;
-      body = new FormData();
-      body.append("model", s.imageModel);
-      body.append("prompt", prompt);
-      body.append("size", "1536x1024");
-      for (const ref of references) {
-        store.project(ref.projectId);
-        const file = safePath(store.projectDir(ref.projectId), ref.path);
-        const ext = path.extname(file).toLowerCase();
-        const mime = {
-          ".png": "image/png",
-          ".jpg": "image/jpeg",
-          ".jpeg": "image/jpeg",
-          ".webp": "image/webp",
-        }[ext];
-        if (!mime || !fs.existsSync(file))
-          throw Error("Reference must be an existing PNG, JPEG or WebP image");
-        body.append(
-          "image[]",
-          new Blob([fs.readFileSync(file)], { type: mime }),
-          path.basename(file),
-        );
-      }
-    } else {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify({
-        model: s.imageModel,
-        prompt,
-        n: 1,
-        size: "1536x1024",
-      });
-    }
-    const r = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(600000),
-    });
-    if (!r.ok)
-      throw Error(
-        `Image provider ${r.status}: ${(await r.text()).slice(0, 500)}`,
-      );
-    const j = await r.json();
-    let buffer;
-    if (j.data?.[0]?.b64_json)
-      buffer = Buffer.from(j.data[0].b64_json, "base64");
-    else if (j.data?.[0]?.url) {
-      const url = new URL(j.data[0].url);
-      if (url.protocol !== "https:")
-        throw Error("Provider image URL must use HTTPS");
-      const image = await fetch(url);
-      if (!image.ok) throw Error("Could not retrieve generated image");
-      buffer = Buffer.from(await image.arrayBuffer());
-    } else throw Error("Image endpoint did not return an image");
-    const rel = `assets/thumbnail-${uid()}.png`;
-    atomic(path.join(store.projectDir(p.id), rel), buffer);
-    const t = store.put("thumbnails", {
-      id: uid(),
-      name: p.title,
-      projectId: p.id,
-      path: rel,
-      prompt: req.body.prompt,
-      provider: "api",
-      model: s.imageModel,
-      parentId: req.body.parentId || null,
-      styleKey: channel?.thumbnailStyleKey || "",
-      createdAt: new Date().toISOString(),
-    });
-    res.json(t);
+      }),
+    );
   });
   route("get", "/api/comfy/models", async (req, res) =>
     res.json(

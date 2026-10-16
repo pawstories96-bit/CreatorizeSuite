@@ -46,6 +46,14 @@ import { Button, Modal, Badge, Busy, Empty } from "./ui";
 import Assets from "./Assets";
 import { ProjectModelPicker, providerNames } from "./ModelSelect";
 import { TimelineEditor } from "./TimelineEditor";
+import { SilenceTrimmer } from "./SilenceTrimmer";
+import { ReferencePicker } from "./ReferencePicker";
+import { ScriptSettings, type ScriptSettingsHandle } from "./ScriptSettings";
+import { qualityLevels, qualityDescriptions } from "../public/lib/quality.js";
+import { StyleParameters } from "./StyleParameters";
+import { CharacterBuilder } from "./CharacterBuilder";
+import { RetakeEditor } from "./RetakeEditor";
+import { resolveAgentRoute, capabilityFor } from "../server/agent-routing.mjs";
 const stageInfo = [
   ["script", "Script written", FileText, "Open"],
   ["voiceover", "Voiceover added", AudioLines, "Add"],
@@ -102,8 +110,10 @@ export default function Editor({
     [notes, setNotes] = useState(false),
     [note, setNote] = useState("");
   const player = useRef<HTMLIFrameElement>(null),
+    scriptSettings = useRef<ScriptSettingsHandle>(null),
     audio = useRef<HTMLAudioElement>(null),
     audioFile = useRef<HTMLInputElement>(null),
+    cameraFile = useRef<HTMLInputElement>(null),
     wordsFile = useRef<HTMLInputElement>(null),
     last = useRef(0),
     posRef = useRef(0),
@@ -121,6 +131,14 @@ export default function Editor({
     providerNames[
       running?.provider || p.agent?.provider || state.settings.provider
     ] || "AI assistant";
+  const displayRoute = running?.provider
+    ? { provider: running.provider, model: running.model || "" }
+    : resolveAgentRoute(state.settings, "build", p.agent);
+  const capability = capabilityFor(
+    state.settings,
+    displayRoute,
+    state.settings.calibrations || [],
+  );
   const post = (data: any) =>
     player.current?.contentWindow?.postMessage(data, location.origin);
   const seek = (t: number) => {
@@ -368,6 +386,24 @@ export default function Editor({
           <Button small onClick={() => setModal("assets")}>
             Assets
           </Button>
+          <Button small onClick={() => setModal("references")}>
+            Pick parts
+          </Button>
+          <Button
+            small
+            disabled={!!running}
+            onClick={() => setModal("style-parameters")}
+          >
+            <SlidersHorizontal size={14} />
+            Style
+          </Button>
+          <button
+            className="icon-button"
+            title="Build a rigged character"
+            onClick={() => setModal("character")}
+          >
+            <Sparkles size={16} />
+          </button>
           <Button primary small onClick={() => setModal("export")}>
             <Download size={15} />
             Export
@@ -568,6 +604,24 @@ export default function Editor({
                 >
                   <SlidersHorizontal size={15} /> Edit tracks
                 </button>
+                {p.audio && (
+                  <button
+                    title="Review repeated takes"
+                    disabled={!!running || !p.words.length}
+                    onClick={() => setModal("takes")}
+                  >
+                    <Scissors size={15} /> Review takes
+                  </button>
+                )}
+                {p.audio && (
+                  <button
+                    title="Trim pauses"
+                    disabled={!!running}
+                    onClick={() => setModal("trim")}
+                  >
+                    <Scissors size={15} /> Trim pauses
+                  </button>
+                )}
                 {range && (
                   <button
                     title="Clear selected range"
@@ -1012,6 +1066,11 @@ export default function Editor({
                 )}
               </div>
               <div className="agent-model-bar">
+                <Badge status={capability.tier ? "done" : "pending"}>
+                  {capability.tier
+                    ? `Tier ${capability.tier}`
+                    : "Not calibrated"}
+                </Badge>
                 <span>
                   {running
                     ? `Working${running.model ? ` · ${running.model}` : ""}`
@@ -1026,6 +1085,13 @@ export default function Editor({
                 />
               </div>
               <div className="agent-composer">
+                {capability.lite && (
+                  <p className="form-hint">
+                    Lite mode · Expect simpler visuals and more manual fixes.
+                    New scenes use up to 40 elements. Choose a stronger model
+                    here or configure an independent QA model in Connections.
+                  </p>
+                )}
                 {scope === "range" && range && (
                   <small className="range-caption">
                     Editing{" "}
@@ -1125,14 +1191,20 @@ export default function Editor({
                     </button>
                   ) : (
                     shot?.scene && (
-                      <button
-                        onClick={() =>
-                          job("ultra", { scope: "shot", shotId: shot.id })
-                        }
-                      >
-                        <Sparkles size={11} />
-                        UltraEdit
-                      </button>
+                      <div className="row">
+                        <button
+                          onClick={() =>
+                            job("ultra", { scope: "shot", shotId: shot.id })
+                          }
+                        >
+                          <Sparkles size={11} />
+                          UltraEdit
+                        </button>
+                        <button onClick={() => setModal("upgrade-plus")}>
+                          <Sparkles size={11} />
+                          Ultra Edit+
+                        </button>
+                      </div>
                     )
                   )}
                 </div>
@@ -1218,9 +1290,102 @@ export default function Editor({
           notify={notify}
         />
       )}
+      {modal === "trim" && (
+        <SilenceTrimmer
+          project={p}
+          wave={wave}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
+      {modal === "references" && (
+        <ReferencePicker
+          project={p}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+          running={!!running}
+        />
+      )}
+      {modal === "style-parameters" && (
+        <StyleParameters
+          project={p}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
+      {modal === "character" && (
+        <CharacterBuilder
+          project={p}
+          state={state}
+          shotId={shot?.id}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
+      {modal === "takes" && (
+        <RetakeEditor
+          project={p}
+          state={state}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
+      {modal === "upgrade-plus" && (
+        <Modal
+          title="Ultra Edit+ · Target-guided upgrade"
+          onClose={() => setModal("")}
+        >
+          <div className="modal-body">
+            <p>{qualityDescriptions[5]}</p>
+            <p>
+              The current shot will use your Ultra role model. The matching loop
+              has a two-minute budget after concept generation. If it fails, the
+              original scene is preserved.
+            </p>
+            <label>
+              Upgrade direction
+              <textarea
+                value={direction}
+                onChange={(e) => setDirection(e.target.value)}
+                placeholder="More detailed piping, realistic lighting, connected structural supports…"
+              />
+            </label>
+          </div>
+          <footer>
+            <Button onClick={() => setModal("")}>Cancel</Button>
+            <Button
+              primary
+              disabled={busy || !!running || !shot?.scene}
+              onClick={() =>
+                job("ultra", {
+                  scope: "shot",
+                  shotId: shot?.id,
+                  quality: "Ultra Edit+",
+                  secondsPerShot: 120,
+                  prompt: direction,
+                })
+              }
+            >
+              Generate target & upgrade shot
+            </Button>
+          </footer>
+        </Modal>
+      )}
       {modal === "script" && (
         <Modal title="The script" wide onClose={() => setModal("")}>
           <div className="modal-body">
+            <ScriptSettings
+              ref={scriptSettings}
+              project={p}
+              disabled={!!running}
+              refresh={refresh}
+              notify={notify}
+            />
             <div className="row spread">
               <div className="tabs">
                 <button
@@ -1273,7 +1438,13 @@ export default function Editor({
           <footer>
             <Button
               small
-              onClick={() => job("script")}
+              onClick={async () => {
+                const saved = await act(async () => {
+                  await scriptSettings.current?.save();
+                  return true;
+                });
+                if (saved) await job("script");
+              }}
               disabled={busy || !!running}
             >
               <Sparkles size={14} />
@@ -1295,10 +1466,13 @@ export default function Editor({
               primary
               disabled={busy || !!running}
               onClick={async () => {
-                const r = await act(
-                  () => api(`/projects/${p.id}`, "PATCH", { script, research }),
-                  "Script saved",
-                );
+                const r = await act(async () => {
+                  await scriptSettings.current?.save();
+                  return api(`/projects/${p.id}`, "PATCH", {
+                    script,
+                    research,
+                  });
+                }, "Script saved");
                 if (r) setModal("");
               }}
             >
@@ -1311,6 +1485,9 @@ export default function Editor({
         <Modal title="Give your story a voice" onClose={() => setModal("")}>
           <div className="modal-body">
             <div className="tabs inset">
+              <button onClick={() => cameraFile.current?.click()}>
+                Import camera video
+              </button>
               <button
                 className={voiceProvider === "import" ? "selected" : ""}
                 onClick={() => setVoiceProvider("import")}
@@ -1482,37 +1659,24 @@ export default function Editor({
               ))}
             </div>
             <label>
-              Quality{" "}
-              <strong className="mint">
-                {
-                  ["Standard", "More depth", "Polished", "Verified", "Ultra"][
-                    quality
-                  ]
-                }
-              </strong>
+              Quality <strong className="mint">{qualityLevels[quality]}</strong>
               <input
                 type="range"
                 min="0"
-                max="4"
+                max="5"
                 step="1"
                 value={quality}
                 onChange={(e) => setQuality(Number(e.target.value))}
               />
             </label>
             <div className="quality-stops">
-              {["Standard", "More depth", "Polished", "Verified", "Ultra"].map(
-                (s, i) => (
-                  <span key={s} className={i === quality ? "mint" : ""}>
-                    {s}
-                  </span>
-                ),
-              )}
+              {qualityLevels.map((s, i) => (
+                <span key={s} className={i === quality ? "mint" : ""}>
+                  {s}
+                </span>
+              ))}
             </div>
-            <p className="form-hint">
-              {quality < 3
-                ? "Per-shot rendered frame checks. Higher tiers request more detail from your chosen model."
-                : "Adds a separate visual review with Codex image input. Additional provider usage applies."}
-            </p>
+            <p className="form-hint">{qualityDescriptions[quality]}</p>
             <div className="notice">
               {p.pipeline.wordsTimed === "done"
                 ? `${p.words.length} timed words are ready. Completed shots can be previewed while the rest build.`
@@ -1526,13 +1690,7 @@ export default function Editor({
               disabled={busy || p.pipeline.wordsTimed !== "done" || !!running}
               onClick={() =>
                 job("build", {
-                  quality: [
-                    "Standard",
-                    "More depth",
-                    "Polished",
-                    "Verified",
-                    "Ultra",
-                  ][quality],
+                  quality: qualityLevels[quality],
                   direction,
                 })
               }
@@ -1641,16 +1799,70 @@ export default function Editor({
                 <h3>
                   {item.title || item.shotId} · {time(item.time)}
                 </h3>
+                {item.target && (
+                  <figure>
+                    <img
+                      src={media(p, item.target)}
+                      alt="Target concept"
+                      style={{
+                        width: "100%",
+                        maxHeight: 440,
+                        objectFit: "contain",
+                      }}
+                    />
+                    <figcaption>Generated target concept</figcaption>
+                  </figure>
+                )}
                 <div className="comparison-pair">
                   <figure>
-                    <img src={media(p, item.before)} alt="Before the edit" />
+                    {item.beforeClip ? (
+                      <video
+                        controls
+                        muted
+                        loop
+                        preload="metadata"
+                        poster={media(p, item.before)}
+                        src={media(p, item.beforeClip)}
+                        aria-label="Before the edit"
+                      />
+                    ) : (
+                      <img src={media(p, item.before)} alt="Before the edit" />
+                    )}
                     <figcaption>Before</figcaption>
                   </figure>
                   <figure>
-                    <img src={media(p, item.after)} alt="After the edit" />
+                    {item.afterClip ? (
+                      <video
+                        controls
+                        muted
+                        loop
+                        preload="metadata"
+                        poster={media(p, item.after)}
+                        src={media(p, item.afterClip)}
+                        aria-label="After the edit"
+                      />
+                    ) : (
+                      <img src={media(p, item.after)} alt="After the edit" />
+                    )}
                     <figcaption>After</figcaption>
                   </figure>
                 </div>
+                {item.beforeClip && (
+                  <Button
+                    small
+                    onClick={(e) => {
+                      const videos = e.currentTarget
+                        .closest("section")
+                        ?.querySelectorAll("video");
+                      videos?.forEach((v) => {
+                        v.currentTime = 0;
+                        void v.play().catch(() => {});
+                      });
+                    }}
+                  >
+                    Play both motion previews
+                  </Button>
+                )}
               </section>
             ))}
           </div>
@@ -1677,6 +1889,25 @@ export default function Editor({
           </div>
         </Modal>
       )}
+      <input
+        hidden
+        ref={cameraFile}
+        type="file"
+        accept="video/*"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const form = new FormData();
+            form.append("file", file);
+            const result = await act(
+              () => api(`/projects/${p.id}/camera`, "POST", form),
+              "Preparing camera footage and transcript",
+            );
+            if (result) setModal("");
+          }
+          e.target.value = "";
+        }}
+      />
       <input
         hidden
         ref={audioFile}

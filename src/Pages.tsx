@@ -1,6 +1,11 @@
+import { fullChannelRoutine } from "../public/lib/routines.js";
+import { ChannelBoard } from "./ChannelBoard";
 import { useEffect, useRef, useState } from "react";
 import { ThumbnailBoard } from "./ThumbnailBoard";
 import { ThumbnailHelper } from "./ThumbnailHelper";
+import { ThumbnailPrompt } from "./ThumbnailPrompt";
+import { StyleTrainer } from "./StyleTrainer";
+import { ChannelCatalog } from "./ChannelCatalog";
 import { AudienceLearning } from "./AudienceLearning";
 import { ModelSelect } from "./ModelSelect";
 import { ProviderPolicy } from "./ProviderPolicy";
@@ -94,7 +99,7 @@ export function WorkspacePages({
       localStorage.getItem("thumbnailProject") || "",
     ),
     [imagePrompt, setImagePrompt] = useState(""),
-    [boardView, setBoardView] = useState(true),
+    [boardView, setBoardView] = useState("canvas"),
     [styleId, setStyleId] = useState("flat");
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -149,7 +154,7 @@ export function WorkspacePages({
           <PageHead
             eyebrow="YOUR VISUAL LANGUAGE"
             title="Style library"
-            description="Five distinct starting points. Make any of them your own."
+            description="Seven production styles, with live previews and editable looks."
           >
             <Button
               onClick={() => {
@@ -159,6 +164,9 @@ export function WorkspacePages({
             >
               <Plus size={16} />
               Customize a style
+            </Button>
+            <Button primary onClick={() => setModal("style-trainer")}>
+              Train from references
             </Button>
           </PageHead>
           <div className="styles-grid">
@@ -465,39 +473,14 @@ export function WorkspacePages({
                       </button>
                     </div>
                   </div>
-                  <div className="workflow-board">
-                    {[
-                      "draft",
-                      "editing",
-                      "ready",
-                      "scheduled",
-                      "published",
-                    ].map((status) => (
-                      <div className="workflow-column" key={status}>
-                        <div className="tiny-label">
-                          {status}{" "}
-                          <span>
-                            {
-                              state.projects.filter(
-                                (p) =>
-                                  p.channelId === c.id && p.status === status,
-                              ).length
-                            }
-                          </span>
-                        </div>
-                        {state.projects
-                          .filter(
-                            (p) => p.channelId === c.id && p.status === status,
-                          )
-                          .map((p) => (
-                            <button key={p.id} onClick={() => open(p)}>
-                              {p.title}
-                              <small>{p.shots.length} shots</small>
-                            </button>
-                          ))}
-                      </div>
-                    ))}
-                  </div>
+                  <ChannelBoard
+                    projects={state.projects.filter(
+                      (p) => p.channelId === c.id,
+                    )}
+                    open={open}
+                    refresh={refresh}
+                    notify={notify}
+                  />
                 </section>
               ))}
             </div>
@@ -517,6 +500,9 @@ export function WorkspacePages({
             </div>
           )}
         </>
+      )}
+      {page === "Channels" && (
+        <ChannelCatalog state={state} refresh={refresh} notify={notify} />
       )}
       {page === "Thumbnails" && (
         <>
@@ -541,16 +527,22 @@ export function WorkspacePages({
           <div className="filter-bar">
             <div className="tabs">
               <button
-                className={boardView ? "selected" : ""}
-                onClick={() => setBoardView(true)}
+                className={boardView === "canvas" ? "selected" : ""}
+                onClick={() => setBoardView("canvas")}
               >
                 Canvas
               </button>
               <button
-                className={!boardView ? "selected" : ""}
-                onClick={() => setBoardView(false)}
+                className={boardView === "library" ? "selected" : ""}
+                onClick={() => setBoardView("library")}
               >
                 Project library
+              </button>
+              <button
+                className={boardView === "prompt" ? "selected" : ""}
+                onClick={() => setBoardView("prompt")}
+              >
+                Prompt
               </button>
             </div>
             <select
@@ -571,7 +563,14 @@ export function WorkspacePages({
             refresh={refresh}
             notify={notify}
           />
-          {boardView ? (
+          {boardView === "prompt" ? (
+            <ThumbnailPrompt
+              state={state}
+              projectId={projectId}
+              refresh={refresh}
+              notify={notify}
+            />
+          ) : boardView === "canvas" ? (
             <ThumbnailBoard
               key={projectId}
               projectId={projectId}
@@ -811,6 +810,7 @@ export function WorkspacePages({
                   <option value="codex">ChatGPT / Codex</option>
                   <option value="claude">Claude Code</option>
                   <option value="local">Local model</option>
+                  <option value="anthropic">Anthropic API</option>
                   <option value="api">OpenAI-compatible API</option>
                 </select>
               </label>
@@ -851,6 +851,14 @@ export function WorkspacePages({
                   value={settings.apiUrl || ""}
                   onChange={(e) => set("apiUrl", e.target.value)}
                   placeholder="https://api.openai.com/v1"
+                />
+              </label>
+              <label>
+                Anthropic API base URL
+                <input
+                  value={settings.anthropicUrl || ""}
+                  onChange={(e) => set("anthropicUrl", e.target.value)}
+                  placeholder="https://api.anthropic.com/v1"
                 />
               </label>
               <label>
@@ -982,6 +990,30 @@ export function WorkspacePages({
               </Button>
             </div>
             <div className="credential-status">
+              {[
+                ["imageKey", "Image API"],
+                ["falKey", "fal"],
+                ["higgsfieldKey", "Higgsfield"],
+              ].map(([key, label]) => (
+                <span key={key}>
+                  {label}{" "}
+                  <Badge
+                    status={state.settings.vault?.[key] ? "connected" : ""}
+                  >
+                    {state.settings.vault?.[key] ? "Saved" : "Not configured"}
+                  </Badge>
+                </span>
+              ))}
+              <span>
+                Anthropic API key{" "}
+                <Badge
+                  status={state.settings.vault?.anthropicKey ? "connected" : ""}
+                >
+                  {state.settings.vault?.anthropicKey
+                    ? "Saved"
+                    : "Not configured"}
+                </Badge>
+              </span>
               <span>
                 AI API key{" "}
                 <Badge status={state.settings.vault?.apiKey ? "connected" : ""}>
@@ -1058,6 +1090,7 @@ export function WorkspacePages({
                     <option value="codex">Codex</option>
                     <option value="claude">Claude</option>
                     <option value="local">Local</option>
+                    <option value="anthropic">Anthropic API</option>
                     <option value="api">API</option>
                   </select>
                   <ModelSelect
@@ -1087,7 +1120,6 @@ export function WorkspacePages({
       )}
       {page === "Settings" && (
         <>
-          <ImageProviderSettings settings={settings} set={set} />
           <PageHead
             eyebrow="MAKE YOURSELF AT HOME"
             title="Settings"
@@ -1098,6 +1130,7 @@ export function WorkspacePages({
               Save settings
             </Button>
           </PageHead>
+          <ImageProviderSettings settings={settings} set={set} />
           <section className="panel settings-section">
             <div className="section-head">
               <div>
@@ -1227,14 +1260,17 @@ export function WorkspacePages({
                   placeholder="Provider default"
                 />
               </label>
-              <label>
-                Image model
-                <input
-                  value={settings.imageModel || ""}
-                  onChange={(e) => set("imageModel", e.target.value)}
-                  placeholder="Model supported by your image endpoint"
-                />
-              </label>
+              {(!settings.imageProvider ||
+                settings.imageProvider === "api") && (
+                <label>
+                  Image model
+                  <input
+                    value={settings.imageModel || ""}
+                    onChange={(e) => set("imageModel", e.target.value)}
+                    placeholder="Model supported by your image endpoint"
+                  />
+                </label>
+              )}
               {[
                 ["piperExecutable", "Piper executable path"],
                 ["piperModel", "Piper ONNX voice path"],
@@ -1251,22 +1287,28 @@ export function WorkspacePages({
                   />
                 </label>
               ))}
-              <label>
-                Image API endpoint
-                <input
-                  value={settings.imageUrl || ""}
-                  onChange={(e) => set("imageUrl", e.target.value)}
-                  placeholder="https://api.openai.com/v1/images/generations"
-                />
-              </label>
-              <label>
-                Image edit endpoint (reference images)
-                <input
-                  value={settings.imageEditUrl || ""}
-                  onChange={(e) => set("imageEditUrl", e.target.value)}
-                  placeholder="https://api.openai.com/v1/images/edits"
-                />
-              </label>
+              {(!settings.imageProvider ||
+                settings.imageProvider === "api") && (
+                <label>
+                  Image API endpoint
+                  <input
+                    value={settings.imageUrl || ""}
+                    onChange={(e) => set("imageUrl", e.target.value)}
+                    placeholder="https://api.openai.com/v1/images/generations"
+                  />
+                </label>
+              )}
+              {(!settings.imageProvider ||
+                settings.imageProvider === "api") && (
+                <label>
+                  Image edit endpoint (reference images)
+                  <input
+                    value={settings.imageEditUrl || ""}
+                    onChange={(e) => set("imageEditUrl", e.target.value)}
+                    placeholder="https://api.openai.com/v1/images/edits"
+                  />
+                </label>
+              )}
             </div>
             <div className="notice">
               Local transcription uses faster-whisper. Its model downloads on
@@ -1535,6 +1577,15 @@ export function WorkspacePages({
           </footer>
         </Modal>
       )}
+      {modal === "style-trainer" && (
+        <StyleTrainer
+          state={state}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+          initialProject={active?.id}
+        />
+      )}
       {modal === "style" && (
         <Modal title="Make a style your own" onClose={() => setModal("")}>
           <div className="modal-body">
@@ -1599,8 +1650,11 @@ export function WorkspacePages({
               >
                 {[
                   ["apiKey", "AI API key"],
+                  ["anthropicKey", "Anthropic API key"],
                   ["elevenlabs", "ElevenLabs"],
                   ["imageKey", "Image provider"],
+                  ["falKey", "fal API key"],
+                  ["higgsfieldKey", "Higgsfield API key ID:secret"],
                   ["fish", "Fish Audio"],
                   ["googleClientId", "Google Desktop client ID"],
                   ["googleClientSecret", "Google Desktop client secret"],
@@ -1842,6 +1896,9 @@ function PublishModal({
 }
 
 const routineActions = [
+  ["schedule", "Schedule"],
+  ["script-rules", "Script rules"],
+  ["finish", "Final actions"],
   ["topics", "Find a topic"],
   ["create", "Create project"],
   ["script", "Write script"],
@@ -1897,6 +1954,68 @@ function RoutineOptions({
     set = (key: string, value: any) => onChange({ ...o, [key]: value });
   return (
     <>
+      {action === "schedule" && (
+        <p className="form-hint">
+          Configure this routine’s daily or cron schedule below. Manual runs
+          start immediately.
+        </p>
+      )}
+      {action === "script-rules" && (
+        <p className="form-hint">
+          Checks the project’s saved banned phrases, required phrases and
+          maximum sentence length. A violation stops this run for review.
+        </p>
+      )}
+      {action === "finish" && (
+        <>
+          <label>
+            <input
+              type="checkbox"
+              checked={o.reframe !== false}
+              onChange={(e) => set("reframe", e.target.checked)}
+            />{" "}
+            Create vertical trailer
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={o.upload === true}
+              onChange={(e) => set("upload", e.target.checked)}
+            />{" "}
+            Upload after preceding approval
+          </label>
+          <label>
+            Upload privacy
+            <select
+              value={o.privacy || "private"}
+              onChange={(e) => set("privacy", e.target.value)}
+            >
+              <option value="private">Private</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="public">Public</option>
+            </select>
+          </label>
+          <label>
+            Local stage after completion
+            <select
+              value={o.stage || "ready"}
+              onChange={(e) => set("stage", e.target.value)}
+            >
+              {["review", "ready"].map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={o.notify !== false}
+              onChange={(e) => set("notify", e.target.checked)}
+            />{" "}
+            Notify when finished
+          </label>
+        </>
+      )}
       {action === "topics" && (
         <>
           <label>
@@ -2041,11 +2160,16 @@ function RoutineOptions({
               value={o.quality || "Standard"}
               onChange={(e) => set("quality", e.target.value)}
             >
-              {["Draft", "Standard", "Detailed", "Verified", "Ultra"].map(
-                (v) => (
-                  <option key={v}>{v}</option>
-                ),
-              )}
+              {[
+                "Standard",
+                "More Depth",
+                "Polished",
+                "Verified",
+                "Ultra Edit",
+                "Ultra Edit+",
+              ].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
             </select>
           </label>
           <label>
@@ -2155,7 +2279,13 @@ function RoutinePage({
     [maxCost, setMaxCost] = useState(0),
     [topicsPerRun, setTopicsPerRun] = useState(1),
     [maxRunsPerDay, setMaxRunsPerDay] = useState(0),
-    [schedule, setSchedule] = useState({ enabled: false, time: "09:00" }),
+    [schedule, setSchedule] = useState<any>({
+      enabled: false,
+      mode: "daily",
+      time: "09:00",
+      cron: "0 9 * * *",
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
     [modal, setModal] = useState(false),
     [nodeId, setNodeId] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -2278,6 +2408,19 @@ function RoutinePage({
         >
           <Plus size={16} />
           New routine
+        </Button>
+        <Button
+          primary
+          onClick={() => {
+            load("");
+            const graph = fullChannelRoutine();
+            setName("Full channel autopilot");
+            setNodes(graph.nodes as any);
+            setEdges(graph.edges);
+            setNodeId("");
+          }}
+        >
+          Full channel autopilot
         </Button>
       </PageHead>
       {!state.routines.length && !nodes.length && !modal ? (
@@ -2403,22 +2546,78 @@ function RoutinePage({
                   type="checkbox"
                   checked={schedule.enabled}
                   onChange={(e) =>
-                    setSchedule((s) => ({ ...s, enabled: e.target.checked }))
+                    setSchedule((s: any) => ({
+                      ...s,
+                      enabled: e.target.checked,
+                    }))
                   }
                 />
-                Run daily
+                Enable schedule
               </label>
               {schedule.enabled && (
-                <label>
-                  Local time
-                  <input
-                    type="time"
-                    value={schedule.time}
-                    onChange={(e) =>
-                      setSchedule((s) => ({ ...s, time: e.target.value }))
-                    }
-                  />
-                </label>
+                <>
+                  <label>
+                    Schedule type
+                    <select
+                      value={schedule.mode || "daily"}
+                      onChange={(e) =>
+                        setSchedule((s: any) => ({
+                          ...s,
+                          mode: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="daily">Daily</option>
+                      <option value="cron">Cron</option>
+                    </select>
+                  </label>
+                  {schedule.mode === "cron" ? (
+                    <label>
+                      Cron expression
+                      <input
+                        aria-label="Routine cron expression"
+                        value={schedule.cron || "0 9 * * *"}
+                        onChange={(e) =>
+                          setSchedule((s: any) => ({
+                            ...s,
+                            cron: e.target.value,
+                          }))
+                        }
+                        placeholder="0 9 * * 1-5"
+                      />
+                    </label>
+                  ) : (
+                    <label>
+                      Time
+                      <input
+                        type="time"
+                        value={schedule.time}
+                        onChange={(e) =>
+                          setSchedule((s: any) => ({
+                            ...s,
+                            time: e.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                  <label>
+                    Time zone
+                    <input
+                      aria-label="Routine time zone"
+                      value={
+                        schedule.timeZone ||
+                        Intl.DateTimeFormat().resolvedOptions().timeZone
+                      }
+                      onChange={(e) =>
+                        setSchedule((s: any) => ({
+                          ...s,
+                          timeZone: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </>
               )}
               <p className="form-hint">
                 Scheduled routines run while the app is open. Approval steps
@@ -2441,6 +2640,7 @@ function RoutinePage({
                   <option value="codex">Codex</option>
                   <option value="claude">Claude</option>
                   <option value="local">Local model</option>
+                  <option value="anthropic">Anthropic API</option>
                   <option value="api">Compatible API</option>
                 </select>
               </label>
@@ -2547,11 +2747,17 @@ function RoutinePage({
             setName(r.name || "Imported routine");
             setTopic(r.topic || "");
             setAgent(r.agent || {});
-            setProjectId(state.projects.some((p) => p.id === r.projectId) ? r.projectId : "");
+            setProjectId(
+              state.projects.some((p) => p.id === r.projectId)
+                ? r.projectId
+                : "",
+            );
             setSchedule(r.schedule || { enabled: false, time: "09:00" });
             setMaxCost(Number(r.maxCost) || 0);
             setMaxRunsPerDay(Number(r.maxRunsPerDay) || 0);
-            setTopicsPerRun(Math.max(1, Math.min(10, Number(r.topicsPerRun) || 1)));
+            setTopicsPerRun(
+              Math.max(1, Math.min(10, Number(r.topicsPerRun) || 1)),
+            );
             setSelected("");
           } catch {
             notify("Invalid routine JSON");
@@ -2572,6 +2778,18 @@ function RoutinePage({
                 <span>{new Date(j.createdAt).toLocaleString()}</span>
                 <Badge status={j.status}>{j.status}</Badge>
                 <small>{j.events.at(-1)?.text}</small>
+                {j.status === "waiting" && j.projectId && (
+                  <Button
+                    small
+                    onClick={() =>
+                      act(() =>
+                        api("/open-folder", "POST", { projectId: j.projectId }),
+                      )
+                    }
+                  >
+                    Review output
+                  </Button>
+                )}
                 {j.error?.includes("Waiting for your approval") ? (
                   <Button
                     small

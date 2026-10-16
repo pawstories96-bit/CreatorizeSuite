@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { chromium } from "playwright";
+import { startServer } from "../server/index.mjs";
+import { uid, validateScene } from "../server/core.mjs";
+const service = await startServer({ root: path.resolve(".test-geographic-assets-" + uid()), port: 0 });
+const browser = await chromium.launch();
+try {
+  const p = await service.store.create({ title: "Internal real assets check", style: "3d", look: "Studio" });
+  p.durationSec = 4; p.shots = [{ id: "s001", title: "Assets", start: 0, end: 4, narration: "Real geometry", scene: validateScene({ elements: [{ id: "floor", type: "box", width: 10, height: .2, depth: 10, y: -.1 }] }) }]; service.store.saveProject(p);
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } }), errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(service.url); await page.getByText(p.title, { exact: true }).first().click(); await page.getByRole("button", { name: "Assets", exact: true }).click();
+  await page.getByRole("button", { name: "3D Models", exact: true }).click(); await page.getByPlaceholder("Search real CC0 3D props…").fill("chair"); await page.getByRole("button", { name: "Search", exact: true }).click();
+  const card = page.locator(".asset-card").filter({ hasText: "Arm Chair 01" }).first(); await card.waitFor({ timeout: 60000 }); await card.getByRole("button", { name: "Add to library", exact: true }).click();
+  await page.getByText("Asset downloaded with attribution", { exact: true }).waitFor({ timeout: 60000 });
+  const assets = await fetch(service.url + `/api/assets/${p.id}`).then(r => r.json()), model = assets.find(a => a.path.endsWith(".glb")); assert.ok(model); assert.equal(fs.readFileSync(path.join(service.store.projectDir(p.id), model.path)).toString("ascii", 0, 4), "glTF"); assert.equal(model.embeddedResources, 4);
+  const renderer = await browser.newPage({ viewport: { width: 1280, height: 720 } }); const shaderErrors = []; renderer.on("pageerror", e => shaderErrors.push(e.message));
+  await renderer.goto(service.url + "/player.html?width=1280&height=720"); await renderer.waitForFunction(() => window.ready);
+  const candidate = structuredClone(p); candidate.shots[0].scene = validateScene({ camera: { x: 5, y: 4, z: 7 }, elements: [{ id: "real-chair", type: "model", src: model.path, x: 0, y: 0, z: 0, scale: 3 }] });
+  await renderer.evaluate(p => window.FC.setProject(p), candidate); await renderer.evaluate(() => window.FC.renderFrame(1)); await renderer.screenshot({ path: "test-results/real-model.png" });
+  await page.getByRole("button", { name: "Maps", exact: true }).click(); await page.getByLabel("Map latitude").fill("40.7484"); await page.getByLabel("Map longitude").fill("-73.9857"); await page.getByLabel("Map radius").fill("150");
+  await page.getByRole("button", { name: "Import map geometry", exact: true }).click(); await page.getByText("Geographic data and attribution saved", { exact: true }).waitFor({ timeout: 90000 });
+  await page.getByRole("button", { name: "Replace current shot with map scene", exact: true }).click(); await page.getByText(/Map scene applied to the selected shot/).waitFor();
+  const updated = service.store.project(p.id); assert.ok(updated.shots[0].scene.elements.some(e => e.type === "terrain")); assert.ok(updated.shots[0].scene.elements.some(e => e.id.startsWith("osm-building-")));
+  await renderer.evaluate(p => window.FC.setProject(p), updated); const result = await renderer.evaluate(() => window.FC.renderFrame(1)); await renderer.screenshot({ path: "test-results/real-map.png" });
+  assert.ok(result.shotId); assert.deepEqual(shaderErrors, []); assert.deepEqual(errors, []);
+  assert.equal(service.store.all("projects").length, 1);
+  console.log("PASS: live CC0 search/download UI, published resource checksums, embedded textured GLB rendering, actual OSM footprints/roads plus public DEM mesh, geographic scene application and attribution");
+} finally { await browser.close(); await service.close(); }

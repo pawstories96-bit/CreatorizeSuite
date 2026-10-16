@@ -69,7 +69,7 @@ export function ThumbnailBoard({
   refresh: () => Promise<void>;
   notify: (s: string) => void;
 }) {
-  const boardId = projectId || "master";
+  const boardId = projectId || (state.activeWorkspace && state.activeWorkspace !== "personal" ? `master-${state.activeWorkspace}` : "master");
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<any>([]);
   const [saving, setSaving] = useState(false),

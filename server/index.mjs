@@ -16,6 +16,7 @@ import {
   safePath,
   validateWords,
   validateScene,
+  validateStyleParams,
   topo,
   allowedLicense,
 } from "./core.mjs";
@@ -29,6 +30,19 @@ import { AgentTools } from "./agent-tools.mjs";
 import { watchScenes } from "./scene-watch.mjs";
 import { validateTimeline } from "./timeline.mjs";
 import { savedJobError } from "./provider-errors.mjs";
+import { stylePreview } from "./style-previews.mjs";
+import { analyzeSilence } from "./audio-edits.mjs";
+import { inspectReference } from "./references.mjs";
+import { validateScriptSettings } from "./script-rules.mjs";
+import { workflowStages } from "../public/lib/workflow.js";
+import { activeWorkspace, inWorkspace, workspaceList } from "./workspaces.mjs";
+import { styleModule } from "./style-training.mjs";
+import { validateSchedule, runSchedules } from "./schedules.mjs";
+import { queueAudienceLearning } from "./learning.mjs";
+import { searchModels, downloadModel } from "./models.mjs";
+import { fetchMap } from "./maps.mjs";
+import { imageCatalog } from "./cloud-images.mjs";
+import { FlowBridge } from "./flow-bridge.mjs";
 const appRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -36,10 +50,12 @@ const appRoot = path.resolve(
 export async function startServer(options = {}) {
   const root =
     options.root ||
+    process.env.CREATORIZE_WORKSPACE ||
     process.env.FRAMECRAFT_WORKSPACE ||
     path.join(appRoot, ".workspace");
   const store = await new Store().init(root),
     vault = new Vault(root);
+  store.flowBridge = new FlowBridge(store);
   if (options.safeStorage) vault.safeStorage = options.safeStorage;
   const agents = new AgentRunner(store, vault),
     pipeline = new Pipeline(store, agents, vault);
@@ -83,8 +99,7 @@ export async function startServer(options = {}) {
   });
   route("get", "/api/state", async (req, res) =>
     res.json({
-      projects: store
-        .all("projects")
+      projects: inWorkspace(store, store.all("projects"))
         .map((p) => ({
           ...p,
           agent: store.get("projectAgents", p.id)?.agent || null,
@@ -92,15 +107,37 @@ export async function startServer(options = {}) {
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       jobs: store
         .all("jobs")
+        .filter(
+          (j) =>
+            ["test", "calibrate"].includes(j.action) ||
+            (j.workspaceId ||
+              (j.projectId
+                ? store.get("projects", j.projectId)?.workspaceId
+                : null) ||
+              "personal") === activeWorkspace(store),
+        )
         .map((j) => ({ ...j, displayError: savedJobError(j) }))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      channels: store.all("channels"),
+      channels: inWorkspace(store, store.all("channels")),
       memory: store.all("memory"),
       memoryProposals: store.all("memoryProposals"),
       styles: [...styles, ...store.all("styles")],
-      routines: store.all("routines"),
-      thumbnails: store.all("thumbnails"),
-      boards: store.all("boards"),
+      routines: inWorkspace(store, store.all("routines")),
+      thumbnails: store
+        .all("thumbnails")
+        .filter(
+          (t) =>
+            (store.get("projects", t.projectId)?.workspaceId || "personal") ===
+            activeWorkspace(store),
+        ),
+      boards: store
+        .all("boards")
+        .filter(
+          (b) =>
+            (b.workspaceId ||
+              store.get("projects", b.projectId)?.workspaceId ||
+              "personal") === activeWorkspace(store),
+        ),
       uploads: store.all("uploads").map(({ location, ...record }) => record),
       learnings: store.all("learnings"),
       settings: {
@@ -108,13 +145,172 @@ export async function startServer(options = {}) {
         calibrations: store.all("calibrations"),
         vault: {
           apiKey: vault.has("apiKey"),
+          anthropicKey: vault.has("anthropicKey"),
           elevenlabs: vault.has("elevenlabs"),
+          imageKey: vault.has("imageKey"),
+          falKey: vault.has("falKey"),
+          higgsfieldKey: vault.has("higgsfieldKey"),
           google: vault.has("googleTokens"),
         },
       },
       workspace: root,
+      activeWorkspace: activeWorkspace(store),
+      workspaces: workspaceList(store),
+      catalogs: store.all("catalogs"),
+      characters: inWorkspace(store, store.all("characters")),
     }),
   );
+  route("get", "/api/styles/:id/preview", async (req, res) => {
+    const style = styles.find((s) => s.id === req.params.id);
+    if (!style) throw Error("Unknown built-in style");
+    const look = style.looks.includes(req.query.look)
+      ? req.query.look
+      : style.look;
+    res.json(stylePreview(style.id, look));
+  });
+  route("get", "/api/styles/:id/module", async (req, res) => {
+    const style = store.get("styles", req.params.id);
+    if (!style) throw Error("Custom style not found");
+    res.type("application/javascript").send(styleModule(style));
+  });
+  route("get", "/api/characters/:id/preview", async (req, res) => {
+    const character = store.get("characters", req.params.id);
+    if (!character) throw Error("Character not found");
+    const element = {
+      ...character.element,
+      x: 640,
+      y: 365,
+      width: 320,
+      height: 470,
+      pose: ["idle", "walk", "run", "point", "sit"].includes(req.query.pose)
+        ? req.query.pose
+        : "idle",
+    };
+    res.json({
+      id: "character-preview",
+      style: character.style,
+      format: "16:9",
+      durationSec: 8,
+      shots: [
+        {
+          id: "rig-preview",
+          start: 0,
+          end: 8,
+          scene: validateScene({ background: "#e8e7de", elements: [element] }),
+        },
+      ],
+    });
+  });
+  route(
+    "post",
+    "/api/projects/:id/characters/:character/insert",
+    async (req, res) => {
+      const p = store.project(req.params.id),
+        character = store.get("characters", req.params.character);
+      if (!character) throw Error("Character not found");
+      if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+        throw Error("Stop the active job before inserting a character");
+      const shot = p.shots.find((s) => s.id === req.body.shotId);
+      if (!shot?.scene) throw Error("Choose a built shot for the character");
+      const element = {
+        ...character.element,
+        id: `character-${uid()}`,
+        x: p.format === "9:16" ? 360 : 640,
+        y: p.format === "9:16" ? 860 : 450,
+        width: 260,
+        height: 350,
+      };
+      shot.scene = validateScene({
+        ...shot.scene,
+        elements: [...shot.scene.elements, element],
+      });
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
+      store.saveProject(p);
+      atomic(
+        path.join(store.projectDir(p.id), "scenes", shot.id + ".json"),
+        shot.scene,
+      );
+      atomic(
+        path.join(store.projectDir(p.id), "scenes", shot.id + ".js"),
+        `export default ${JSON.stringify(shot.scene)};\n`,
+      );
+      await store.commit(p.id, "Insert rigged character " + character.name);
+      res.json(p);
+    },
+  );
+  route("post", "/api/workspaces", async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name || name.length > 80)
+      throw Error("Name your workspace using 1–80 characters");
+    res.json(
+      store.put("workspaces", {
+        id: uid(),
+        name,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+  });
+  route("post", "/api/catalogs", async (req, res) => {
+    res.json(
+      pipeline.enqueue(null, "catalog", {
+        url: req.body.url,
+        limit: req.body.limit,
+        dates: req.body.dates === true,
+        refresh: req.body.refresh === true,
+      }),
+    );
+  });
+  route("get", "/api/model-assets", async (req, res) =>
+    res.json(await searchModels(store, req.query.q)),
+  );
+  route("post", "/api/projects/:id/maps", async (req, res) =>
+    res.json(await fetchMap(store, store.project(req.params.id), req.body)),
+  );
+  route("post", "/api/projects/:id/maps/apply", async (req, res) => {
+    const p = store.project(req.params.id);
+    if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+      throw Error("Stop the active job before applying a map scene");
+    if (!/^assets\/map-[a-f0-9]+\.scene\.json$/.test(req.body.path || ""))
+      throw Error("Choose an imported map scene");
+    const record = read(safePath(store.projectDir(p.id), req.body.path));
+    const shot = p.shots.find((s) => s.id === req.body.shotId);
+    if (!shot || !record?.scene) throw Error("Choose a shot and imported map");
+    shot.scene = validateScene(record.scene);
+    shot.status = "built";
+    p.lastExport = null;
+    p.pipeline.exported = "pending";
+    store.saveProject(p);
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".json"),
+      shot.scene,
+    );
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".js"),
+      `export default ${JSON.stringify(shot.scene)};\n`,
+    );
+    await store.commit(p.id, "Apply geographic map scene");
+    res.json(p);
+  });
+  route("post", "/api/projects/:id/models", async (req, res) =>
+    res.json(
+      await downloadModel(
+        store,
+        store.project(req.params.id),
+        String(req.body.id || ""),
+      ),
+    ),
+  );
+  route("post", "/api/workspaces/:id/select", async (req, res) => {
+    if (!workspaceList(store).some((w) => w.id === req.params.id))
+      throw Error("Workspace not found");
+    store.put("settings", {
+      ...store.settings(),
+      id: "app",
+      activeWorkspace: req.params.id,
+    });
+    res.json({ ok: true });
+  });
   route("get", "/api/projects/:id", async (req, res) =>
     res.json({
       ...store.project(req.params.id),
@@ -127,6 +323,117 @@ export async function startServer(options = {}) {
     store.put("projectAgents", { id: req.params.id, agent });
     res.json({ agent });
   });
+  route("post", "/api/projects/:id/silence/analyze", async (req, res) => {
+    res.json(
+      await analyzeSilence(store, store.project(req.params.id), req.body),
+    );
+  });
+  route("post", "/api/projects/:id/reference-info", async (req, res) => {
+    res.json(
+      await inspectReference(store, store.project(req.params.id), {
+        ...req.body,
+        label: "Reference",
+      }),
+    );
+  });
+  route("post", "/api/projects/:id/kanban", async (req, res) => {
+    if (!workflowStages.includes(req.body.stage))
+      throw Error("Choose one of the eight channel stages");
+    const p = store.project(req.params.id);
+    if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+      throw Error("Wait for the active job before moving its channel card");
+    p.kanbanStage = req.body.stage;
+    p.status = {
+      idea: "draft",
+      script: "draft",
+      voiceover: "draft",
+      building: "editing",
+      review: "editing",
+      ready: "ready",
+      scheduled: "scheduled",
+      published: "published",
+    }[req.body.stage];
+    store.saveProject(p);
+    await store.commit(p.id, "Move channel card to " + req.body.stage);
+    res.json(p);
+  });
+  route("post", "/api/projects/:id/script-settings", async (req, res) => {
+    const p = store.project(req.params.id);
+    if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+      throw Error("Stop the active job before changing scripting rules");
+    p.scriptSettings = validateScriptSettings(req.body);
+    if (req.body.removeSkill === true) delete p.scriptingSkill;
+    store.saveProject(p);
+    await store.commit(p.id, "Update scripting methodology and rules");
+    res.json(p);
+  });
+  app.post(
+    "/api/projects/:id/scripting-skill",
+    upload.single("file"),
+    async (req, res, next) => {
+      try {
+        const p = store.project(req.params.id);
+        if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+          throw Error("Stop the active job before changing scripting skills");
+        if (
+          !req.file ||
+          !/\.(md|txt)$/i.test(req.file.originalname) ||
+          req.file.size > 131072
+        )
+          throw Error("Choose a .md or .txt scripting skill up to 128 KB");
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(
+          fs.readFileSync(req.file.path),
+        );
+        if (!text.trim() || text.includes("\0"))
+          throw Error("Choose a nonempty UTF-8 text file");
+        p.scriptingSkill = {
+          name: path.basename(req.file.originalname),
+          text,
+          uploadedAt: new Date().toISOString(),
+        };
+        store.saveProject(p);
+        await store.commit(p.id, "Load custom scripting skill");
+        res.json(p.scriptingSkill);
+      } catch (e) {
+        next(e);
+      } finally {
+        if (req.file) fs.unlinkSync(req.file.path);
+      }
+    },
+  );
+  route("post", "/api/projects/:id/references", async (req, res) => {
+    const p = store.project(req.params.id);
+    if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+      throw Error("Stop the active job before changing references");
+    if ((p.references || []).length >= 10)
+      throw Error("Use at most ten technique references per project");
+    pipeline.externalLocks.add(p.id);
+    try {
+      const ref = await inspectReference(store, p, req.body);
+      p.references = [...(p.references || []), ref];
+      store.saveProject(p);
+      await store.commit(p.id, "Add technique reference: " + ref.label);
+      res.json(ref);
+    } finally {
+      pipeline.externalLocks.delete(p.id);
+      pipeline.pump();
+    }
+  });
+  route(
+    "delete",
+    "/api/projects/:id/references/:reference",
+    async (req, res) => {
+      const p = store.project(req.params.id);
+      if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+        throw Error("Stop the active job before changing references");
+      p.references = (p.references || []).filter(
+        (r) => r.id !== req.params.reference,
+      );
+      store.saveProject(p);
+      await store.commit(p.id, "Remove technique reference");
+      res.json(p);
+    },
+  );
   route("post", "/api/projects/:id/timeline", async (req, res) => {
     const p = store.project(req.params.id);
     if (
@@ -202,6 +509,11 @@ export async function startServer(options = {}) {
       "metadata",
       "status",
     ];
+    if ("styleParams" in req.body) {
+      p.styleParams = validateStyleParams(req.body.styleParams);
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
+    }
     for (const k of allowed) if (k in req.body) p[k] = req.body[k];
     if ("script" in req.body && req.body.script !== p.script) {
       p.script = String(req.body.script);
@@ -306,7 +618,10 @@ export async function startServer(options = {}) {
       if (!manifest) throw Error("ZIP must contain project.json");
       const prefix = manifest.entryName.slice(0, -12),
         data = JSON.parse(manifest.getData().toString("utf8"));
-      const p = await store.create(data),
+      const p = await store.create({
+          ...data,
+          workspaceId: activeWorkspace(store),
+        }),
         dest = store.projectDir(p.id);
       let size = 0;
       for (const entry of entries) {
@@ -324,6 +639,7 @@ export async function startServer(options = {}) {
         id: p.id,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
+        workspaceId: p.workspaceId,
       };
       imported.shots = (imported.shots || []).map((s) => ({
         ...s,
@@ -332,6 +648,36 @@ export async function startServer(options = {}) {
       if (imported.shots.some((s) => !/^[\w-]{1,100}$/.test(s.id)))
         throw Error("Invalid shot ID in imported project");
       const agent = normalizeAgent(imported.agent);
+      if (imported.styleDefinition) {
+        const custom = imported.styleDefinition;
+        if (
+          !styles.some((s) => s.id === custom.baseStyle) ||
+          typeof custom.name !== "string" ||
+          (custom.guide != null &&
+            (typeof custom.guide !== "string" || custom.guide.length > 16000))
+        )
+          throw Error("Invalid custom style in project archive");
+        const checked = validateScene({
+          effects: custom.sceneDefaults?.effects || {},
+          elements: [{ id: "style-check", type: "circle", radius: 1 }],
+        });
+        const restored = {
+          ...custom,
+          id: uid(),
+          sceneDefaults: { effects: checked.effects },
+          updatedAt: new Date().toISOString(),
+        };
+        store.put("styles", restored);
+        imported.style = restored.id;
+        imported.styleDefinition = restored;
+      }
+      if (
+        imported.channelId &&
+        !inWorkspace(store, store.all("channels")).some(
+          (c) => c.id === imported.channelId,
+        )
+      )
+        imported.channelId = null;
       delete imported.agent;
       store.put("projectAgents", { id: p.id, agent });
       if (imported.audio) safePath(dest, imported.audio);
@@ -390,6 +736,32 @@ export async function startServer(options = {}) {
       }
     },
   );
+  app.post(
+    "/api/projects/:id/camera",
+    upload.single("file"),
+    async (req, res, next) => {
+      try {
+        const p = store.project(req.params.id);
+        if (
+          !req.file ||
+          !/\.(mp4|mov|mkv|webm|m4v)$/i.test(req.file.originalname)
+        )
+          throw Error("Choose a camera video file");
+        if ([...pipeline.active.values()].some((j) => j.projectId === p.id))
+          throw Error("Stop the active job before replacing camera footage");
+        const source = `assets/camera-source-${uid()}${path.extname(req.file.originalname).toLowerCase()}`;
+        fs.copyFileSync(
+          req.file.path,
+          path.join(store.projectDir(p.id), source),
+        );
+        res.json(pipeline.enqueue(p.id, "prepare-camera", { source }));
+      } catch (error) {
+        next(error);
+      } finally {
+        if (req.file) fs.rmSync(req.file.path, { force: true });
+      }
+    },
+  );
   route("post", "/api/projects/:id/words", async (req, res) => {
     const p = store.project(req.params.id);
     p.words = validateWords(req.body.words, p.durationSec || Infinity);
@@ -405,11 +777,18 @@ export async function startServer(options = {}) {
         "script",
         "tts",
         "clean",
+        "trim",
         "time",
         "storyboard",
         "build",
         "edit",
         "ultra",
+        "analyze-reference",
+        "train-style",
+        "script-rules",
+        "character",
+        "analyze-takes",
+        "apply-takes",
         "qa",
         "mix",
         "export",
@@ -535,7 +914,17 @@ export async function startServer(options = {}) {
     const data = { ...previous, ...req.body, id: "app" };
     delete data.vault;
     delete data.apiKey;
+    delete data.anthropicKey;
     delete data.elevenlabs;
+    for (const key of [
+      "imageKey",
+      "fish",
+      "falKey",
+      "higgsfieldKey",
+      "googleClientId",
+      "googleClientSecret",
+    ])
+      delete data[key];
     if (data.fallbacks) {
       for (const chain of Object.values(data.fallbacks)) {
         if (!Array.isArray(chain) || chain.length > 4)
@@ -551,13 +940,46 @@ export async function startServer(options = {}) {
     store.put("settings", data);
     res.json(data);
   });
+  route("get", "/api/ui-session", async (req, res) =>
+    res.json(store.get("uiSession", "desktop") || null),
+  );
+  route("post", "/api/ui-session", async (req, res) => {
+    const { page, activeId, collapsed } = req.body;
+    if (
+      ![
+        "Home",
+        "Projects",
+        "Channels",
+        "Editor",
+        "Styles",
+        "Memory",
+        "Thumbnails",
+        "Routines",
+        "Renders",
+        "Usage",
+        "YouTube",
+        "Connections",
+        "Settings",
+      ].includes(page) ||
+      typeof activeId !== "string" ||
+      activeId.length > 100 ||
+      typeof collapsed !== "boolean"
+    )
+      throw Error("Invalid desktop session");
+    res.json(
+      store.put("uiSession", { id: "desktop", page, activeId, collapsed }),
+    );
+  });
   route("post", "/api/credentials", async (req, res) => {
     if (
       ![
         "apiKey",
+        "anthropicKey",
         "elevenlabs",
         "fish",
         "imageKey",
+        "falKey",
+        "higgsfieldKey",
         "fish",
         "googleClientId",
         "googleClientSecret",
@@ -570,6 +992,28 @@ export async function startServer(options = {}) {
   route("get", "/api/connections", async (req, res) =>
     res.json(await agents.detect()),
   );
+  route("get", "/api/image-models", async (req, res) =>
+    res.json(
+      await imageCatalog(String(req.query.provider || ""), {
+        query: String(req.query.q || ""),
+        category: String(req.query.category || ""),
+        cursor: String(req.query.cursor || ""),
+        model: String(req.query.model || ""),
+      }),
+    ),
+  );
+  route("get", "/api/flow/status", async (req, res) =>
+    res.json(await store.flowBridge.status()),
+  );
+  route("post", "/api/flow/open", async (req, res) =>
+    res.json(await store.flowBridge.open()),
+  );
+  route("post", "/api/flow/close", async (req, res) => {
+    if (store.flowBridge.busy)
+      throw Error("Wait for the active Flow request to finish");
+    await store.flowBridge.close();
+    res.json({ ok: true });
+  });
   route("post", "/api/connections/test", async (req, res) =>
     res.json(pipeline.enqueue(null, "test")),
   );
@@ -641,7 +1085,16 @@ export async function startServer(options = {}) {
         id: req.body.id || uid(),
         updatedAt: new Date().toISOString(),
       };
+      if (["channels", "routines"].includes(kind))
+        value.workspaceId =
+          store.get(kind, value.id)?.workspaceId || activeWorkspace(store);
+      if (kind === "boards")
+        value.workspaceId = value.projectId
+          ? store.project(value.projectId).workspaceId || "personal"
+          : activeWorkspace(store);
       if (kind === "routines") topo(value.nodes || [], value.edges || []);
+      if (kind === "routines")
+        value.schedule = validateSchedule(value.schedule);
       if (
         kind === "routines" &&
         value.topicsPerRun != null &&
@@ -774,10 +1227,13 @@ export async function startServer(options = {}) {
     express.static(path.join(appRoot, "node_modules", "three", "build")),
   );
   app.use(express.static(path.join(appRoot, "public")));
-  if (fs.existsSync(path.join(appRoot, "dist", "index.html"))) {
-    app.use(express.static(path.join(appRoot, "dist")));
+  const frontend = fs.existsSync(path.join(appRoot, "out", "index.html"))
+    ? "out"
+    : "dist";
+  if (fs.existsSync(path.join(appRoot, frontend, "index.html"))) {
+    app.use(express.static(path.join(appRoot, frontend)));
     app.get("/{*splat}", (req, res) =>
-      res.sendFile(path.join(appRoot, "dist", "index.html")),
+      res.sendFile(path.join(appRoot, frontend, "index.html")),
     );
   } else {
     const { createServer } = await import("vite");
@@ -807,21 +1263,8 @@ export async function startServer(options = {}) {
     for (const j of store.all("jobs"))
       if (j.status === "paused" && j.nextRetryAt && j.nextRetryAt <= Date.now())
         pipeline.resume(j.id);
-    const now = new Date();
-    for (const r of store.all("routines")) {
-      if (!r.schedule?.enabled || !r.schedule.time) continue;
-      const today = now.toLocaleDateString("en-CA"),
-        time = now.toTimeString().slice(0, 5);
-      if (time === r.schedule.time && r.lastScheduledDay !== today) {
-        r.lastScheduledDay = today;
-        store.put("routines", r);
-        try {
-          pipeline.enqueue(r.projectId || null, "routine", { routineId: r.id });
-        } catch (error) {
-          store.put("routines", { ...r, lastError: error.message });
-        }
-      }
-    }
+    runSchedules(store, pipeline);
+    queueAudienceLearning(store, pipeline, vault);
   }, 15000);
   timer.unref();
   return {
@@ -837,6 +1280,7 @@ export async function startServer(options = {}) {
       clearInterval(timer);
       sceneWatcher.close();
       integrationsRuntime.close();
+      await store.flowBridge.close();
       pipeline.suspended = true;
       for (const j of pipeline.active.values()) {
         j.abort?.();
@@ -854,5 +1298,5 @@ if (
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   const service = await startServer();
-  console.log(`Framecraft Studio: ${service.url}`);
+  console.log(`Creatorize Suite: ${service.url}`);
 }

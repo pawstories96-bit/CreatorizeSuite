@@ -56,8 +56,9 @@ export function ThumbnailHelper({
     <section className="panel settings-section">
       <h2>Thumbnail style helper</h2>
       <p>
-        Choose reference images to analyze, then create three original prompt
-        directions. Every generated image remains in the library.
+        Choose up to five reference images to analyze, then create three
+        original prompt directions. Every generated image remains in the
+        library.
       </p>
       <div className="row">
         {state.thumbnails.slice(0, 30).map((t) => (
@@ -68,7 +69,7 @@ export function ThumbnailHelper({
               onChange={(e) =>
                 setRefs((r) =>
                   e.target.checked
-                    ? [...r, t.id].slice(0, 8)
+                    ? [...r, t.id].slice(0, 5)
                     : r.filter((id) => id !== t.id),
                 )
               }
@@ -94,12 +95,33 @@ export function ThumbnailHelper({
       {result && (
         <div className="form-stack">
           <p>{Object.values(result.analysis || {}).join(" ")}</p>
+          {(result.individual || []).map((item: any) => (
+            <p key={item.reference}>
+              <strong>Reference {item.reference}: </strong>
+              {item.composition} {item.distinctivePatterns}
+            </p>
+          ))}
           <label>
             Reusable style key
             <textarea readOnly rows={4} value={result.styleKey} />
           </label>
           <Button disabled={!project?.channelId} onClick={save}>
             Use style key for channel
+          </Button>
+          <Button
+            onClick={async () => {
+              try {
+                await api("/settings", "POST", {
+                  thumbnailStyleKey: result.styleKey,
+                });
+                await refresh();
+                notify("Global thumbnail style key saved");
+              } catch (e: any) {
+                notify(e.message);
+              }
+            }}
+          >
+            Use as global style key
           </Button>
           {result.prompts.map((prompt: string, i: number) => (
             <label key={i}>

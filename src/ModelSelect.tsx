@@ -20,6 +20,7 @@ type Catalog = {
 export const providerNames: Record<string, string> = {
   codex: "ChatGPT / Codex",
   claude: "Claude Code",
+  anthropic: "Anthropic API",
   local: "Local model",
   api: "API provider",
 };
@@ -111,7 +112,7 @@ export function ModelSelect({
           }}
         >
           <option value="">
-            {["local", "api"].includes(provider)
+            {["local", "api", "anthropic"].includes(provider)
               ? "Choose a model…"
               : "Provider default"}
           </option>
@@ -313,7 +314,7 @@ export function ProjectModelPicker({
             <Button
               primary
               disabled={
-                saving || (["local", "api"].includes(provider) && !model.trim())
+                saving || (["local", "api", "anthropic"].includes(provider) && !model.trim())
               }
               onClick={save}
             >

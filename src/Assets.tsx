@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search, Upload, Image, ExternalLink, Plus } from "lucide-react";
 import { api, media, type Project } from "./types";
 import { Button, Modal, Empty, Badge } from "./ui";
+import { MapImporter } from "./MapImporter";
 export default function Assets({
   project,
   shotId,
@@ -43,11 +44,14 @@ export default function Assets({
       <div className="modal-body">
         <div className="row spread">
           <div className="tabs">
-            {["Library", "Wikimedia Commons"].map((t) => (
+            {["Library", "Wikimedia Commons", "3D Models", "Maps"].map((t) => (
               <button
                 key={t}
                 className={tab === t ? "selected" : ""}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  setTab(t);
+                  setResults([]);
+                }}
               >
                 {t}
               </button>
@@ -58,7 +62,16 @@ export default function Assets({
             Import your media
           </Button>
         </div>
-        {tab === "Wikimedia Commons" && (
+        {tab === "Maps" && (
+          <MapImporter
+            project={project}
+            shotId={shotId}
+            refresh={refresh}
+            notify={notify}
+            load={load}
+          />
+        )}
+        {tab !== "Library" && tab !== "Maps" && (
           <>
             <form
               className="asset-search"
@@ -67,7 +80,11 @@ export default function Assets({
                 setBusy(true);
                 try {
                   setResults(
-                    await api("/asset-search?q=" + encodeURIComponent(query)),
+                    await api(
+                      (tab === "3D Models"
+                        ? "/model-assets?q="
+                        : "/asset-search?q=") + encodeURIComponent(query),
+                    ),
                   );
                 } catch (err: any) {
                   notify(err.message);
@@ -81,7 +98,11 @@ export default function Assets({
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search openly licensed photos…"
+                  placeholder={
+                    tab === "3D Models"
+                      ? "Search real CC0 3D props…"
+                      : "Search openly licensed photos and footage…"
+                  }
                 />
               </div>
               <Button type="submit" disabled={busy || query.length < 2}>
@@ -89,97 +110,113 @@ export default function Assets({
               </Button>
             </form>
             <p className="form-hint">
-              Only public-domain, CC0, CC-BY and CC-BY-SA images are included.
-              Source and attribution are saved with every download.
+              {tab === "3D Models"
+                ? "Poly Haven CC0 models. Geometry and textures are verified and embedded into a local GLB. Source, creator and license are saved."
+                : "Only public-domain, CC0, CC-BY and CC-BY-SA images and footage are included. Source and attribution are saved with every download."}
             </p>
           </>
         )}
-        <div className="asset-grid">
-          {(tab === "Library" ? assets : results).map((a) => (
-            <div className="asset-card" key={a.path || a.id}>
-              {/\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.path || a.url) ? (
-                <img
-                  src={tab === "Library" ? media(project, a.path) : a.preview}
-                  loading="lazy"
-                />
-              ) : (
-                <div className="asset-file">
-                  <Image size={24} />
-                </div>
-              )}
-              <div>
-                <strong>{a.name}</strong>
-                <Badge>{a.license}</Badge>
-                <small>{a.author}</small>
-                <div className="row">
-                  {tab === "Library" ? (
-                    <Button
-                      small
-                      disabled={
-                        (!shotId && !/\.(wav|mp3|ogg|m4a)$/i.test(a.path)) ||
-                        busy
-                      }
-                      onClick={() =>
-                        act(
-                          () =>
-                            api(`/projects/${project.id}/jobs`, "POST", {
-                              action: /\.(wav|mp3|ogg|m4a)$/i.test(a.path)
-                                ? "mix"
-                                : "edit",
-                              options: /\.(wav|mp3|ogg|m4a)$/i.test(a.path)
-                                ? { ambiencePath: a.path, level: -20 }
-                                : {
-                                    scope: "shot",
-                                    shotId,
-                                    prompt: `Use the local ${a.path.endsWith(".glb") ? "3D model" : a.path.endsWith(".mp4") ? "video" : "image"} ${a.path} in this shot. Preserve scene timing and keep the main subject readable.`,
-                                  },
-                            }),
-                          "Asset job queued",
-                        )
-                      }
-                    >
-                      <Plus size={12} />
-                      {/\.(wav|mp3|ogg|m4a)$/i.test(a.path)
-                        ? "Use as audio bed"
-                        : "Use in shot"}
-                    </Button>
-                  ) : (
-                    <Button
-                      small
-                      disabled={busy}
-                      onClick={() =>
-                        act(
-                          () =>
-                            api(
-                              `/projects/${project.id}/assets/download`,
-                              "POST",
-                              a,
-                            ),
-                          "Image downloaded with attribution",
-                        )
-                      }
-                    >
-                      <Plus size={12} />
-                      Add to library
-                    </Button>
-                  )}
-                  {/^https:/.test(a.source) && (
-                    <a
-                      className="icon-button"
-                      title="View asset source"
-                      href={a.source}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={13} />
-                    </a>
-                  )}
+        {tab !== "Maps" && (
+          <div className="asset-grid">
+            {(tab === "Library" ? assets : results).map((a) => (
+              <div className="asset-card" key={a.path || a.id}>
+                {tab === "3D Models" ||
+                /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.path || a.url) ? (
+                  <img
+                    src={tab === "Library" ? media(project, a.path) : a.preview}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="asset-file">
+                    <Image size={24} />
+                  </div>
+                )}
+                <div>
+                  <strong>{a.name}</strong>
+                  <Badge>{a.license}</Badge>
+                  <small>{a.author}</small>
+                  <div className="row">
+                    {tab === "Library" ? (
+                      <Button
+                        small
+                        disabled={
+                          (!shotId && !/\.(wav|mp3|ogg|m4a)$/i.test(a.path)) ||
+                          busy
+                        }
+                        onClick={() =>
+                          act(
+                            () =>
+                              a.kind === "map"
+                                ? api(
+                                    `/projects/${project.id}/maps/apply`,
+                                    "POST",
+                                    { path: a.path, shotId },
+                                  )
+                                : api(`/projects/${project.id}/jobs`, "POST", {
+                                    action: /\.(wav|mp3|ogg|m4a)$/i.test(a.path)
+                                      ? "mix"
+                                      : "edit",
+                                    options: /\.(wav|mp3|ogg|m4a)$/i.test(
+                                      a.path,
+                                    )
+                                      ? { ambiencePath: a.path, level: -20 }
+                                      : {
+                                          scope: "shot",
+                                          shotId,
+                                          prompt: `Use the local ${a.path.endsWith(".glb") ? "3D model" : a.path.endsWith(".mp4") ? "video" : "image"} ${a.path} in this shot. Preserve scene timing and keep the main subject readable.`,
+                                        },
+                                  }),
+                            "Asset job queued",
+                          )
+                        }
+                      >
+                        <Plus size={12} />
+                        {/\.(wav|mp3|ogg|m4a)$/i.test(a.path)
+                          ? "Use as audio bed"
+                          : a.kind === "map"
+                            ? "Replace shot with map"
+                            : "Use in shot"}
+                      </Button>
+                    ) : (
+                      <Button
+                        small
+                        disabled={busy}
+                        onClick={() =>
+                          act(
+                            () =>
+                              api(
+                                tab === "3D Models"
+                                  ? `/projects/${project.id}/models`
+                                  : `/projects/${project.id}/assets/download`,
+                                "POST",
+                                a,
+                              ),
+                            "Asset downloaded with attribution",
+                          )
+                        }
+                      >
+                        <Plus size={12} />
+                        Add to library
+                      </Button>
+                    )}
+                    {/^https:/.test(a.source) && (
+                      <a
+                        className="icon-button"
+                        title="View asset source"
+                        href={a.source}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-        {!(tab === "Library" ? assets : results).length && (
+            ))}
+          </div>
+        )}
+        {tab !== "Maps" && !(tab === "Library" ? assets : results).length && (
           <Empty
             icon={Image}
             title={

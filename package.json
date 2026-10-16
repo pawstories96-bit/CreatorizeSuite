@@ -1,14 +1,14 @@
 {
-  "name": "framecraft-studio",
-  "version": "0.1.0",
+  "name": "creatorize-suite",
+  "version": "0.3.0",
   "private": true,
   "description": "Local AI video production, editing and rendering studio",
-  "author": "Framecraft Studio",
+  "author": "Creatorize Suite",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "node server/index.mjs",
-    "build": "node scripts/prepare-player.mjs && tsc --noEmit && vite build",
+    "build": "node scripts/prepare-player.mjs && next build --webpack",
     "start": "electron .",
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "node tests/e2e.mjs",
@@ -20,17 +20,26 @@
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource-variable/manrope": "^5.3.0",
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@tailwindcss/postcss": "^4.3.3",
     "@xyflow/react": "^12.10.0",
     "adm-zip": "^0.6.1",
+    "cron-parser": "^5.10.2",
     "express": "^5.1.0",
+    "fast-xml-parser": "^5.11.2",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
+    "next": "^16.4.1",
     "playwright": "^1.64.0",
+    "pngjs": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sql.js": "^1.13.0",
+    "tailwindcss": "^4.3.3",
     "three": "^0.180.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -44,12 +53,14 @@
     "vite": "^6.3.0"
   },
   "build": {
+    "electronDist": "node_modules/electron/dist",
     "appId": "studio.framecraft.desktop",
-    "productName": "Framecraft Studio",
+    "productName": "Creatorize Suite",
     "directories": {
-      "output": "release"
+      "output": "release/v0.3.0"
     },
     "files": [
+      "out/**/*",
       "dist/**/*",
       "server/**/*",
       "electron/**/*",
@@ -58,12 +69,15 @@
     ],
     "asarUnpack": [
       "node_modules/sql.js/dist/**/*",
+      "public/lib/styles.js",
+      "public/lib/quality.js",
+      "public/lib/workflow.js",
       "server/**/*"
     ],
     "win": {
       "icon": "public/icon.ico",
       "target": "portable",
-    "signExecutable": false
+      "signExecutable": false
     },
     "extraResources": [
       {

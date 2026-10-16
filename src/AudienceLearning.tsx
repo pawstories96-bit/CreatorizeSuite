@@ -50,6 +50,11 @@ export function AudienceLearning({
           Refresh videos
         </Button>
       </div>
+      <div className="form-grid">
+        <label><input type="checkbox" checked={state.settings.autoLearn === true} onChange={e => { const enabled = e.target.checked; void act(async () => { await api("/settings", "POST", { autoLearn: enabled }); await refresh(); notify(enabled ? "Automatic audience learning enabled" : "Automatic audience learning disabled"); }); }} /> Automatically learn from uploaded videos</label>
+        <label>Automatic rule scope<select value={state.settings.learningScope || "global"} onChange={e => { const scope = e.target.value; void act(async () => { await api("/settings", "POST", { learningScope: scope }); await refresh(); }); }}><option value="global">All videos</option><option value="project">One project</option></select></label>
+      </div>
+      <p className="form-hint">When enabled, checks uploaded videos after 24 hours, then every 48 hours while the app is open. Automatic rules require at least two supporting evidence records. Uncorroborated suggestions remain available for review.</p>
       <div className="row">
         <select
           value={selected}

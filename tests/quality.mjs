@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import path from "node:path";
+import fs from "node:fs";
+import { startServer } from "../server/index.mjs";
+import { uid, run, validateScene } from "../server/core.mjs";
+const service = await startServer({ root: path.resolve(".test-quality-" + uid()), port: 0 });
+const wait = async id => { for (let i = 0; i < 900; i++) { const j = service.store.get("jobs", id); if (["done", "error"].includes(j.status)) return j; await new Promise(r => setTimeout(r, 100)); } throw Error("Quality job timed out"); };
+let fixture;
+try {
+  const p = await service.store.create({ title: "Internal target upgrade check", style: "flat" });
+  const dir = service.store.projectDir(p.id), original = validateScene({ background: "#14222b", elements: [{ id: "subject", type: "circle", x: 640, y: 360, radius: 130, fill: "#d5a94d" }] });
+  p.durationSec = 2; p.shots = [{ id: "s001", title: "Subject", start: 0, end: 2, narration: "The subject changes color.", status: "built", scene: original }]; service.store.saveProject(p);
+  const image = path.join(dir, "assets", "fixture-concept.png"); await run("ffmpeg", ["-y", "-f", "lavfi", "-i", "color=c=green:s=640x360", "-frames:v", "1", image]);
+  let imageCalls = 0;
+  fixture = http.createServer(async (req, res) => { assert.equal(req.headers.authorization, "Bearer fixture-image-key"); assert.match(req.headers["content-type"], /multipart\/form-data/); let data = ""; for await (const chunk of req) data += chunk.toString("latin1"); assert.match(data, /name="image\[\]"/); assert.match(data, /fixture-image-model/); imageCalls++; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ data: [{ b64_json: fs.readFileSync(image).toString("base64") }] })); });
+  await new Promise(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${fixture.address().port}`;
+  service.store.put("settings", { id: "app", imageUrl: base + "/generate", imageEditUrl: base + "/edit", imageModel: "fixture-image-model" });
+  service.vault.get = async () => "fixture-image-key";
+  const roles = []; let accept = true;
+  service.pipeline.agents.generate = async ({ role, images, prompt }) => { roles.push(role); if (role === "qa") { assert.equal(images.length, 2); return { pass: accept, issues: accept ? [] : ["Target detail is still absent"] }; } assert.equal(role, "ultra"); assert.equal(images.length, 2); assert.match(prompt, /Do not replace the scene with a static image/); return { ...original, elements: [{ ...original.elements[0], fill: "#59c67a" }] }; };
+  const result = await wait(service.pipeline.enqueue(p.id, "ultra", { quality: "Ultra Edit+", scope: "shot", shotId: "s001", secondsPerShot: 30 }).id);
+  assert.equal(result.status, "done", result.error); assert.equal(imageCalls, 1); assert.deepEqual(roles, ["ultra", "qa"]); assert.ok(result.comparisons[0].target);
+  for (const key of ["before", "after", "target", "beforeClip", "afterClip"]) assert.ok(fs.statSync(path.join(dir, result.comparisons[0][key])).size > 0);
+  assert.equal(service.store.all("thumbnails").length, 0); assert.equal(service.store.all("concepts").length, 1);
+  const after = structuredClone(service.store.project(p.id).shots[0].scene);
+  accept = false;
+  const failed = await wait(service.pipeline.enqueue(p.id, "ultra", { quality: "Ultra Edit+", scope: "shot", shotId: "s001", secondsPerShot: 60 }).id);
+  assert.equal(failed.status, "error"); assert.match(failed.error, /Target match needs review/); assert.deepEqual(service.store.project(p.id).shots[0].scene, after); assert.ok(failed.targets[0].target);
+  assert.equal(imageCalls, 2); assert.ok(fs.existsSync(path.join(dir, failed.targets[0].target)));
+  console.log("PASS: current-frame multipart image request, real target image, specialist/independent-review loop, actual before/after clips, and rollback with retained target after failed matching");
+} finally { if (fixture) await new Promise(resolve => fixture.close(resolve)); await service.close(); }

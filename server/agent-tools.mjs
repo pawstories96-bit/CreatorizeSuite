@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { validateScene, read, run, safePath, uid } from "./core.mjs";
 import { fetchResearch, searchResearch } from "./research.mjs";
 import { validateTimeline } from "./timeline.mjs";
+import { searchModels, downloadModel } from "./models.mjs";
+import { fetchMap } from "./maps.mjs";
 
 const object = (properties = {}, required = []) => ({
   type: "object",
@@ -19,6 +21,32 @@ const shotInput = {
   },
 };
 export const agentTools = [
+  {
+    name: "fetch_map",
+    description:
+      "Fetch actual OpenStreetMap building footprints/roads and optional public terrain elevations for a known latitude/longitude and radius 50–1000 meters. Returns a local scene with geometry, attribution and estimated-height labels. No geocoding or invented locations.",
+    inputSchema: object(
+      {
+        lat: { type: "number" },
+        lon: { type: "number" },
+        radius: { type: "number" },
+        terrain: { type: "boolean" },
+      },
+      ["lat", "lon"],
+    ),
+  },
+  {
+    name: "search_models",
+    description:
+      "Search the public Poly Haven CC0 catalog for real 3D props. Returns IDs, author/source/license and approximate dimensions. Does not invent model URLs.",
+    inputSchema: object({ query: { type: "string" } }, ["query"]),
+  },
+  {
+    name: "download_model",
+    description:
+      "Download a real CC0 catalog model by ID, verify published checksums and embed its geometry/textures into one local GLB. Returns the asset path and attribution.",
+    inputSchema: object({ id: { type: "string" } }, ["id"]),
+  },
   {
     name: "web_search",
     description:
@@ -115,7 +143,7 @@ export const agentTools = [
   {
     name: "measure_layout",
     description:
-      "Measure rendered text bounds, text overflow, off-screen 2D objects and overlapping text boxes at a shot-relative time. Bounds are in design coordinates; overlapping boxes are candidates for visual review, not necessarily defects. Path and 3D geometry bounds are not measured.",
+      "Measure text and 3D screen bounds, overflow, text overlaps, sampled 3D raycast visibility, marked grounded objects and collision-group bounding volumes at a shot-relative time. Bounds and collisions are conservative review candidates, not exact mesh-intersection proofs. Path bounds are not measured.",
     inputSchema: object(
       { ...shotInput, time: { type: "number", minimum: 0 } },
       ["shotId"],
@@ -147,12 +175,16 @@ export const agentTools = [
 ].map((tool) => ({
   ...tool,
   annotations: {
-    readOnlyHint: !/^(set_|update_|save_|fetch_photo)/.test(tool.name),
+    readOnlyHint:
+      !/^(set_|update_|save_|fetch_photo|download_model|fetch_map)/.test(
+        tool.name,
+      ),
     destructiveHint: false,
     idempotentHint: !/^(save_memory_rule|fetch_photo)$/.test(tool.name),
-    openWorldHint: /^(web_search|fetch_url|search_assets|fetch_photo)$/.test(
-      tool.name,
-    ),
+    openWorldHint:
+      /^(web_search|fetch_url|search_assets|fetch_photo|search_models|download_model|fetch_map)$/.test(
+        tool.name,
+      ),
   },
 }));
 const text = (value) => ({ type: "text", text: JSON.stringify(value) });
@@ -232,6 +264,26 @@ export class AgentTools {
         session.job.calibrationProject ||
           this.store.project(session.job.projectId),
       );
+      if (name === "search_models")
+        return { content: [text(await searchModels(this.store, args.query))] };
+      if (name === "fetch_map")
+        return {
+          content: [text(await fetchMap(this.store, p, args, session.job))],
+        };
+      if (name === "download_model")
+        return {
+          content: [
+            text(
+              await downloadModel(
+                this.store,
+                p,
+                args.id,
+                session.job,
+                session.emit,
+              ),
+            ),
+          ],
+        };
       if (name === "search_assets" || name === "fetch_photo") {
         const search = name === "search_assets";
         const item = session.assets.get(args.id);
@@ -420,7 +472,7 @@ export class AgentTools {
       const page = await browser.newPage({ viewport: { width, height } });
       try {
         await page.goto(
-          `${this.pipeline.base}/player.html?width=${width}&height=${height}`,
+          `${this.pipeline.base}/player.html?width=${width}&height=${height}&inspect=1`,
         );
         await page.waitForFunction(() => window.ready);
         await page.evaluate((project) => window.FC.setProject(project), p);

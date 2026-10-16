@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import crypto from "node:crypto";
+import { anthropicBase, anthropicModels } from "./anthropic.mjs";
 
 // Discovery never starts a model turn or reads the providers' credential files.
 async function protocolSession(executable, args, cwd, task) {
@@ -185,7 +186,7 @@ export class ModelCatalog {
     this.pending = new Map();
   }
   async list(provider, { refresh = false, endpoint } = {}) {
-    if (!["codex", "claude", "api", "local"].includes(provider))
+    if (!["codex", "claude", "anthropic", "api", "local"].includes(provider))
       throw Error("Unknown provider");
     const settings = this.store.settings();
     const base = ["api", "local"].includes(provider)
@@ -195,7 +196,8 @@ export class ModelCatalog {
               ? settings.localUrl
               : settings.apiUrl || "https://api.openai.com/v1"),
         ).replace(/\/$/, "")
-      : "";
+      : provider === "anthropic" ? anthropicBase(settings) : "";
+    if (provider === "anthropic" && endpoint && endpoint.replace(/\/$/, "") !== base) throw Error("Save the Anthropic endpoint in Connections before fetching its model list");
     const key = provider + ":" + base;
     const cached = this.cache.get(key);
     if (!refresh && cached && Date.now() - cached.time < 300_000)
@@ -214,7 +216,10 @@ export class ModelCatalog {
             this.resolveCLI(provider),
             this.store.root,
           );
-        else {
+        else if (provider === "anthropic") {
+          if (endpoint && endpoint.replace(/\/$/, "") !== base) throw Error("Save the Anthropic endpoint in Connections before fetching its model list");
+          models = await anthropicModels(settings, await this.vault.get("anthropicKey"));
+        } else {
           const url = new URL(base);
           if (
             !["http:", "https:"].includes(url.protocol) ||

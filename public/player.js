@@ -1,12 +1,19 @@
 import * as THREE from "/vendor/three.module.js";
 import { GLTFLoader } from "/three-addons/loaders/GLTFLoader.js";
 import { clone } from "/three-addons/utils/SkeletonUtils.js";
+import {
+  geometryTypes,
+  createGeometryObject,
+  createPostProcessing,
+  drawCharacter2d,
+} from "/engine.js";
 const models = new Map(),
   videos = new Map();
 const canvas = document.querySelector("#stage"),
   c = canvas.getContext("2d"),
   threeCanvas = document.querySelector("#three");
 let renderer,
+  postProcessing,
   world,
   camera,
   meshes = [],
@@ -34,11 +41,19 @@ function transform(e, t) {
   if (cue) {
     e = { ...e, delay: cue.time - shot.start };
     if (t < e.delay)
-      return { x: e.x, y: e.y, scale: 1, rotation: e.rotation, opacity: 0 };
+      return {
+        x: e.x,
+        y: e.y,
+        z: e.z,
+        scale: 1,
+        rotation: e.rotation,
+        opacity: 0,
+      };
   }
   let p = ease((t - e.delay) / e.duration),
     x = e.x,
     y = e.y,
+    z = e.z || 0,
     scale = 1,
     rotation = e.rotation,
     opacity = e.opacity;
@@ -50,7 +65,26 @@ function transform(e, t) {
   if (e.animation === "float") y += Math.sin(t * 1.5 + e.x * 0.01) * 8;
   if (e.animation === "pulse") scale = 1 + Math.sin(t * 2) * 0.04;
   if (e.animation === "rotate") rotation += t * 15;
-  return { x, y, scale, rotation, opacity };
+  if (e.animation === "walk") rotation += Math.sin(t * 5 + (e.phase || 0)) * 20;
+  const result = { x, y, z, scale, rotation, opacity };
+  for (const key of Object.keys(result)) {
+    const frames = (e.keyframes || []).filter((k) => k[key] != null);
+    if (!frames.length) continue;
+    let previous = { time: 0, [key]: result[key] };
+    for (const frame of frames) {
+      if (t < frame.time) {
+        const ratio = Math.max(
+          0,
+          (t - previous.time) / (frame.time - previous.time),
+        );
+        result[key] = previous[key] + (frame[key] - previous[key]) * ratio;
+        break;
+      }
+      previous = frame;
+      result[key] = frame[key];
+    }
+  }
+  return result;
 }
 function lines(text, size, maxWidth) {
   c.font = `${project.style === "collage" ? "bold" : "600"} ${size}px ${project.style === "collage" ? "Georgia" : "Arial"}`;
@@ -67,8 +101,38 @@ function lines(text, size, maxWidth) {
   return result;
 }
 function draw(e, t) {
+  if (e.anchor3d && camera) {
+    const target = new THREE.Vector3(
+      e.anchor3d.x,
+      e.anchor3d.y,
+      e.anchor3d.z,
+    ).project(camera);
+    if (target.z < -1 || target.z > 1) return;
+    const ax = ((target.x + 1) * logicalWidth) / 2,
+      ay = ((1 - target.y) * logicalHeight) / 2;
+    const x = e.x || ax + 100,
+      y = e.y || ay - 70;
+    c.save();
+    c.strokeStyle = e.stroke || "#4c5d64";
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(ax, ay);
+    c.lineTo(x, y);
+    c.stroke();
+    c.fillStyle = c.strokeStyle;
+    c.beginPath();
+    c.arc(ax, ay, 4, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+    e = { ...e, x, y };
+  }
   const a = transform(e, t);
-  let metric = { id: e.id, type: e.type, visible: a.opacity > 0.01 };
+  let metric = {
+    id: e.id,
+    type: e.type,
+    essential: e.essential,
+    visible: a.opacity > 0.01,
+  };
   let boxWidth = e.type === "circle" ? e.radius * 2 : e.width;
   let boxHeight = e.type === "circle" ? e.radius * 2 : e.height;
   c.save();
@@ -79,7 +143,9 @@ function draw(e, t) {
   c.fillStyle = e.fill;
   c.strokeStyle = e.stroke || e.fill;
   c.lineWidth = e.strokeWidth;
-  if (e.type === "rect") {
+  if (e.type === "character2d") {
+    drawCharacter2d(c, e, t, project.style);
+  } else if (e.type === "rect") {
     c.beginPath();
     c.roundRect(
       -e.width / 2,
@@ -132,7 +198,17 @@ function draw(e, t) {
       overflow: boxHeight > e.height || boxWidth > e.width,
     };
   }
-  if (["rect", "circle", "text", "image", "video", "line"].includes(e.type)) {
+  if (
+    [
+      "rect",
+      "circle",
+      "text",
+      "image",
+      "video",
+      "line",
+      "character2d",
+    ].includes(e.type)
+  ) {
     const angle = (a.rotation * Math.PI) / 180;
     const corners =
       e.type === "line"
@@ -183,13 +259,11 @@ function draw(e, t) {
   c.restore();
 }
 function build3d(s) {
+  postProcessing?.dispose();
+  postProcessing = null;
+  meshes = [];
   threeCanvas.style.display = "none";
-  if (
-    !s?.scene?.elements.some((e) =>
-      ["box", "sphere", "cylinder", "cone", "model"].includes(e.type),
-    )
-  )
-    return;
+  if (!s?.scene?.elements.some((e) => geometryTypes.includes(e.type))) return;
   threeCanvas.style.display = "block";
   if (!renderer) {
     renderer = new THREE.WebGLRenderer({
@@ -204,18 +278,40 @@ function build3d(s) {
   }
   if (world)
     world.traverse((o) => {
+      if (o.isReflector) o.dispose();
+      o.shadow?.dispose?.();
       o.geometry?.dispose();
       if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
       else o.material?.dispose();
     });
   world = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 500);
   const cp = s.scene.camera || { x: 12, y: 10, z: 18 };
+  camera = new THREE.PerspectiveCamera(
+    40,
+    width / height,
+    0.1,
+    Math.max(500, Math.hypot(cp.x, cp.y, cp.z) * 8),
+  );
   camera.position.set(cp.x, cp.y, cp.z);
   camera.lookAt(0, 1, 0);
-  world.add(new THREE.HemisphereLight(0xe6f0ff, 0x4b5260, 2));
-  const light = new THREE.DirectionalLight(0xffffff, 3);
-  light.position.set(8, 16, 10);
+  const lighting = s.scene.lighting;
+  world.add(
+    new THREE.HemisphereLight(0xe6f0ff, 0x4b5260, lighting?.ambient ?? 2),
+  );
+  const light = new THREE.DirectionalLight(0xffffff, lighting?.key ?? 3);
+  const lp = lighting?.position || { x: 8, y: 16, z: 10 };
+  light.position.set(lp.x, lp.y, lp.z);
+  light.castShadow = true;
+  light.shadow.mapSize.set(1024, 1024);
+  Object.assign(light.shadow.camera, {
+    left: -20,
+    right: 20,
+    top: 20,
+    bottom: -20,
+    near: 0.1,
+    far: 100,
+  });
+  light.shadow.normalBias = 0.03;
   world.add(light);
   meshes = [];
   for (const e of s.scene.elements) {
@@ -225,6 +321,10 @@ function build3d(s) {
       const m = clone(asset.scene);
       m.traverse((o) => {
         o.userData.id = e.id;
+        if (o.isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
         if (o.material)
           o.material = Array.isArray(o.material)
             ? o.material.map((m) => m.clone())
@@ -237,22 +337,126 @@ function build3d(s) {
       meshes.push({ m, e, mixer });
       continue;
     }
-    let g;
-    if (e.type === "box") g = new THREE.BoxGeometry(e.width, e.height, e.depth);
-    if (e.type === "sphere") g = new THREE.SphereGeometry(e.radius, 32, 24);
-    if (e.type === "cylinder")
-      g = new THREE.CylinderGeometry(e.radius, e.radius, e.height, 32);
-    if (e.type === "cone") g = new THREE.ConeGeometry(e.radius, e.height, 32);
-    if (!g) continue;
-    const m = new THREE.Mesh(
-      g,
-      new THREE.MeshStandardMaterial({ color: e.fill, roughness: 0.85 }),
-    );
+    const m = createGeometryObject(e, {
+      ...project,
+      ps1: s.scene.effects?.ps1,
+    });
+    if (!m) continue;
     m.position.set(e.x, e.y, e.z);
+    m.castShadow = true;
+    m.receiveShadow = true;
     m.userData.id = e.id;
+    m.traverse((o) => {
+      o.userData.id = e.id;
+    });
     world.add(m);
     meshes.push({ m, e });
   }
+  postProcessing = createPostProcessing(
+    renderer,
+    world,
+    camera,
+    project,
+    s.scene,
+    width,
+    height,
+    meshes,
+  );
+}
+function measure3d() {
+  world.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  const boxes = [],
+    ray = new THREE.Raycaster();
+  for (const { m, e } of meshes) {
+    if (
+      !m.visible ||
+      (Array.isArray(m.material)
+        ? m.material[0]?.opacity
+        : m.material?.opacity) === 0
+    )
+      continue;
+    const box = new THREE.Box3().setFromObject(m);
+    if (box.isEmpty()) continue;
+    const points = [];
+    for (const x of [box.min.x, box.max.x])
+      for (const y of [box.min.y, box.max.y])
+        for (const z of [box.min.z, box.max.z])
+          points.push(new THREE.Vector3(x, y, z).project(camera));
+    const bounds = {
+      left: Math.min(...points.map((p) => ((p.x + 1) * logicalWidth) / 2)),
+      right: Math.max(...points.map((p) => ((p.x + 1) * logicalWidth) / 2)),
+      top: Math.min(...points.map((p) => ((1 - p.y) * logicalHeight) / 2)),
+      bottom: Math.max(...points.map((p) => ((1 - p.y) * logicalHeight) / 2)),
+    };
+    const offscreen =
+      bounds.left < 0 ||
+      bounds.right > logicalWidth ||
+      bounds.top < 0 ||
+      bounds.bottom > logicalHeight ||
+      points.every((p) => p.z < -1 || p.z > 1);
+    const center = box.getCenter(new THREE.Vector3()),
+      size = box.getSize(new THREE.Vector3());
+    const samples = [center];
+    for (const axis of ["x", "y", "z"])
+      for (const side of [-1, 1]) {
+        const point = center.clone();
+        point[axis] += size[axis] * 0.4 * side;
+        samples.push(point);
+      }
+    let seen = 0;
+    for (const point of samples) {
+      const projected = point.clone().project(camera);
+      ray.setFromCamera(new THREE.Vector2(projected.x, projected.y), camera);
+      const hit = ray
+        .intersectObjects(
+          meshes.filter((v) => v.m.visible).map((v) => v.m),
+          true,
+        )
+        .find(
+          (h) => h.object.visible && (h.object.material?.opacity ?? 1) > 0.01,
+        );
+      if (hit?.object.userData.id === e.id) seen++;
+    }
+    const problems = [];
+    if (e.essential && offscreen)
+      problems.push("essential subject leaves the frame");
+    if (e.essential && seen === 0)
+      problems.push("essential subject is fully occluded in raycast samples");
+    if (e.grounded && box.min.y > 0.05)
+      problems.push("grounded object floats above y=0");
+    if (e.grounded && box.min.y < -0.05)
+      problems.push("grounded object penetrates ground y=0");
+    const metric = {
+      id: e.id,
+      type: e.type,
+      visible: true,
+      essential: e.essential,
+      bounds,
+      offscreen,
+      visibleSamples: seen,
+      raycastSamples: samples.length,
+      worldBounds: { min: box.min.toArray(), max: box.max.toArray() },
+      problems,
+    };
+    metrics.push(metric);
+    boxes.push({ box, e, metric });
+  }
+  for (let i = 0; i < boxes.length; i++)
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i],
+        b = boxes[j];
+      if (!a.e.collisionGroup || a.e.collisionGroup !== b.e.collisionGroup)
+        continue;
+      const overlap = a.box
+        .clone()
+        .intersect(b.box)
+        .getSize(new THREE.Vector3());
+      if (Math.min(overlap.x, overlap.y, overlap.z) > 0.02) {
+        a.metric.problems.push(`bounding volume intersects ${b.e.id}`);
+        b.metric.problems.push(`bounding volume intersects ${a.e.id}`);
+      }
+    }
 }
 function render(t) {
   currentTime = t;
@@ -270,32 +474,80 @@ function render(t) {
   c.scale(canvas.width / logicalWidth, canvas.height / logicalHeight);
   c.fillStyle = s?.scene?.background || "#121818";
   c.fillRect(0, 0, logicalWidth, logicalHeight);
+  const cameraVideo = project.sourceVideo && videos.get(project.sourceVideo);
+  if (cameraVideo?.readyState >= 2) {
+    const scale = Math.max(
+      logicalWidth / cameraVideo.videoWidth,
+      logicalHeight / cameraVideo.videoHeight,
+    );
+    c.drawImage(
+      cameraVideo,
+      (logicalWidth - cameraVideo.videoWidth * scale) / 2,
+      (logicalHeight - cameraVideo.videoHeight * scale) / 2,
+      cameraVideo.videoWidth * scale,
+      cameraVideo.videoHeight * scale,
+    );
+  }
   if (s?.scene) {
     const local = Math.max(0, t - s.start);
     for (const { m, e, mixer } of meshes) {
       const a = transform(e, local);
-      m.position.set(a.x, a.y, e.z);
-      m.rotation.y = (a.rotation * Math.PI) / 180;
+      m.visible = a.opacity > 0.01;
+      m.position.set(a.x, a.y, a.z);
+      m.rotation.set(
+        ((e.rotation3d?.x || 0) * Math.PI) / 180 +
+          (m.userData.fixedRotationX || 0),
+        ((a.rotation + (e.rotation3d?.y || 0)) * Math.PI) / 180,
+        ((e.rotation3d?.z || 0) * Math.PI) / 180,
+      );
       m.scale.setScalar(a.scale * (e.scale || 1));
       mixer?.setTime(local);
+      m.userData.animate?.(local);
       m.traverse((o) => {
         for (const material of Array.isArray(o.material)
           ? o.material
           : o.material
             ? [o.material]
             : []) {
-          material.opacity = a.opacity;
-          material.transparent = a.opacity < 1;
+          if (o.isReflector) continue;
+          material.opacity = a.opacity * (material.userData.alpha ?? 1);
+          material.transparent =
+            material.opacity < 1 || !!material.transmission;
         }
       });
     }
     if (renderer && threeCanvas.style.display !== "none") {
-      renderer.render(world, camera);
+      const rig = s.scene.cameraRig;
+      if (rig) {
+        const target = new THREE.Vector3(
+          rig.target.x,
+          rig.target.y,
+          rig.target.z,
+        );
+        if (rig.type === "orbit")
+          camera.position.set(
+            target.x + Math.sin(local * rig.speed) * rig.radius,
+            target.y + rig.height,
+            target.z + Math.cos(local * rig.speed) * rig.radius,
+          );
+        else {
+          const from = s.scene.camera || { x: 12, y: 10, z: 18 },
+            to = rig.to || from;
+          camera.position.lerpVectors(
+            new THREE.Vector3(from.x, from.y, from.z),
+            new THREE.Vector3(to.x, to.y, to.z),
+            Math.min(1, local / rig.duration),
+          );
+        }
+        camera.lookAt(target);
+      }
+      if (postProcessing) postProcessing.render(local, selected);
+      else renderer.render(world, camera);
       c.drawImage(threeCanvas, 0, 0, logicalWidth, logicalHeight);
+      if (params.has("inspect")) measure3d();
     }
     for (const e of s.scene.elements)
-      if (!["box", "sphere", "cylinder", "cone", "model"].includes(e.type))
-        draw(e, local);
+      if (!geometryTypes.includes(e.type)) draw(e, local);
     if (s.scene.label || project.style === "3d") {
       c.fillStyle = "rgba(0,0,0,.6)";
       c.fillRect(logicalWidth - 270, 24, 246, 34);
@@ -304,7 +556,7 @@ function render(t) {
       c.textAlign = "center";
       c.fillText(s.scene.label || "RECONSTRUCTION", logicalWidth - 147, 46);
     }
-  } else {
+  } else if (!cameraVideo) {
     c.fillStyle = "#74847e";
     c.font = "22px Arial";
     c.textAlign = "center";
@@ -356,10 +608,74 @@ function render(t) {
         0,
       );
     }
+  if (s?.scene?.effects?.halftone ?? project.style === "collage") {
+    c.save();
+    c.globalAlpha = 0.1;
+    c.fillStyle = "#392c24";
+    for (let y = 0; y < logicalHeight; y += 9)
+      for (let x = (Math.floor(y / 9) % 2) * 4.5; x < logicalWidth; x += 9) {
+        c.beginPath();
+        c.arc(x, y, 0.8, 0, Math.PI * 2);
+        c.fill();
+      }
+    c.restore();
+  }
   c.restore();
+  if (project.style === "pixel") {
+    const image = c.getImageData(0, 0, canvas.width, canvas.height),
+      bands = Math.max(
+        2,
+        Math.min(
+          16,
+          Number(project.styleParams?.colorBands) ||
+            (project.look === "Expanded palette" ? 8 : 4),
+        ),
+      );
+    for (let i = 0; i < image.data.length; i += 4)
+      for (let channel = 0; channel < 3; channel++)
+        image.data[i + channel] =
+          (Math.round((image.data[i + channel] / 255) * (bands - 1)) /
+            (bands - 1)) *
+          255;
+    c.putImageData(image, 0, 0);
+  }
   return { shotId: s?.id, metrics };
 }
 async function setProject(p) {
+  if (p.baseStyle && p.baseStyle !== p.style) {
+    const module = await import(
+      `/api/styles/${encodeURIComponent(p.style)}/module?v=${encodeURIComponent(p.updatedAt || "")}`
+    );
+    p = {
+      ...p,
+      style: p.baseStyle,
+      shots: p.shots.map((s) => ({
+        ...s,
+        scene: s.scene ? module.applyStyle(s.scene) : s.scene,
+      })),
+    };
+  }
+  if (p.styleParams?.effects || p.styleParams?.lighting)
+    p = {
+      ...p,
+      shots: p.shots.map((s) => ({
+        ...s,
+        scene: s.scene
+          ? {
+              ...s.scene,
+              effects: { ...s.scene.effects, ...p.styleParams.effects },
+              ...(p.styleParams.lighting
+                ? {
+                    lighting: {
+                      ...s.scene.lighting,
+                      ...p.styleParams.lighting,
+                    },
+                  }
+                : {}),
+            }
+          : s.scene,
+      })),
+    };
   project = p;
   shot = null;
   logicalWidth = p.format === "9:16" ? 720 : 1280;
@@ -368,8 +684,10 @@ async function setProject(p) {
     width = logicalWidth;
     height = logicalHeight;
   }
-  canvas.width = p.style === "pixel" ? Math.round(width / 2) : width;
-  canvas.height = p.style === "pixel" ? Math.round(height / 2) : height;
+  canvas.width =
+    p.style === "pixel" ? (p.format === "9:16" ? 360 : 640) : width;
+  canvas.height =
+    p.style === "pixel" ? (p.format === "9:16" ? 640 : 360) : height;
   canvas.style.imageRendering = p.style === "pixel" ? "pixelated" : "auto";
   if (renderer) renderer.setSize(width, height);
   images.clear();
@@ -381,6 +699,7 @@ async function setProject(p) {
   });
   videos.clear();
   const mediaElements = p.shots.flatMap((s) => s.scene?.elements || []);
+  if (p.sourceVideo) mediaElements.push({ type: "video", src: p.sourceVideo });
   const manager = new THREE.LoadingManager();
   manager.setURLModifier((url) => {
     if (
@@ -448,16 +767,28 @@ async function setProject(p) {
   render(currentTime);
 }
 function videoTime(e, t, v) {
+  if (e.camera) {
+    const cut = project.cameraCuts?.findLast(
+      (c) => t >= c.outputStart && t <= c.outputEnd + 0.001,
+    );
+    const local =
+      (cut ? cut.sourceStart + t - cut.outputStart : t) +
+      (project.cameraAudioOffset || 0);
+    return Math.max(0, Math.min(local, v.duration - 0.04));
+  }
   const local = Math.max(0, t - shot.start + (e.offset || 0));
   return e.loop !== false
     ? local % v.duration
     : Math.min(local, Math.max(0, v.duration - 0.04));
 }
 async function renderFrame(t) {
-  render(t);
+  const initial = render(t);
   const targets = (shot?.scene?.elements || []).filter(
     (e) => e.type === "video",
   );
+  if (project.sourceVideo)
+    targets.push({ src: project.sourceVideo, camera: true });
+  if (!targets.length) return initial;
   await Promise.all(
     targets.map(
       (e) =>
@@ -516,15 +847,17 @@ canvas.addEventListener("click", (event) => {
     x = ((event.clientX - r.left) / r.width) * logicalWidth,
     y = ((event.clientY - r.top) / r.height) * logicalHeight;
   const e = [...(shot?.scene?.elements || [])]
-    .filter(
-      (e) => !["box", "sphere", "cylinder", "cone", "model"].includes(e.type),
-    )
+    .filter((e) => !geometryTypes.includes(e.type))
     .reverse()
-    .find(
-      (e) =>
-        Math.abs(x - e.x) < (e.type === "circle" ? e.radius : e.width / 2) &&
-        Math.abs(y - e.y) < (e.type === "circle" ? e.radius : e.height / 2),
-    );
+    .find((e) => {
+      const m = metrics.find((m) => m.id === e.id && m.visible && m.bounds);
+      return m
+        ? x >= m.bounds.left &&
+            x <= m.bounds.right &&
+            y >= m.bounds.top &&
+            y <= m.bounds.bottom
+        : false;
+    });
   let hit;
   if (!e && world && threeCanvas.style.display !== "none") {
     const ray = new THREE.Raycaster();
@@ -572,6 +905,32 @@ threeCanvas.addEventListener("click", (event) => {
 if (params.get("project")) {
   const response = await fetch("/api/projects/" + params.get("project"));
   await setProject(await response.json());
+}
+if (params.get("character")) {
+  const response = await fetch(
+    `/api/characters/${encodeURIComponent(params.get("character"))}/preview?pose=${encodeURIComponent(params.get("pose") || "idle")}`,
+  );
+  if (!response.ok) throw Error("Character preview could not load");
+  await setProject(await response.json());
+  const begin = performance.now();
+  const animate = (now) => {
+    render(((now - begin) / 1000) % 8);
+    requestAnimationFrame(animate);
+  };
+  requestAnimationFrame(animate);
+}
+if (params.get("preview")) {
+  const response = await fetch(
+    `/api/styles/${encodeURIComponent(params.get("preview"))}/preview?look=${encodeURIComponent(params.get("look") || "")}`,
+  );
+  if (!response.ok) throw Error("Style preview is unavailable");
+  await setProject(await response.json());
+  const begin = performance.now();
+  const animate = (now) => {
+    render(((now - begin) / 1000) % 8);
+    requestAnimationFrame(animate);
+  };
+  requestAnimationFrame(animate);
 }
 window.ready = true;
 parent.postMessage({ type: "ready" }, location.origin);

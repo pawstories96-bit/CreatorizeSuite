@@ -14,6 +14,8 @@ export type Project = {
   topic: string;
   direction: string;
   style: string;
+  baseStyle?: string;
+  styleParams?: any;
   look: string;
   format: string;
   language: string;
@@ -21,6 +23,8 @@ export type Project = {
   channelId: string | null;
   status: string;
   createdAt: string;
+  kanbanStage?: string;
+  workspaceId?: string;
   updatedAt: string;
   script: string;
   research: string;
@@ -29,6 +33,12 @@ export type Project = {
   notes: any[];
   pipeline: Record<string, string>;
   audio?: string;
+  sourceVideo?: string;
+  cameraCuts?: any[];
+  sourceTranscript?: string;
+  references?: any[];
+  scriptSettings?: { mode: string; banned: string[]; required: string[]; maxSentenceWords: number };
+  scriptingSkill?: { name: string; text: string };
   mix?: string;
   mixReport?: { ambience: string; levelDb: number; targetLUFS: number };
   durationSec?: number;
@@ -92,6 +102,10 @@ export type State = {
   learnings: any[];
   settings: any;
   workspace: string;
+  activeWorkspace?: string;
+  workspaces?: { id: string; name: string }[];
+  catalogs?: any[];
+  characters?: any[];
 };
 export const emptyState: State = {
   projects: [],

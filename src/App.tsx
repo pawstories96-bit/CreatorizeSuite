@@ -44,6 +44,7 @@ import {
 import { Button, Modal, PageHead, Empty, Badge, StyleArt } from "./ui";
 import Editor from "./Editor";
 import { WorkspacePages } from "./Pages";
+import { useSession } from "./session";
 const nav = [
   ["Home", Home],
   ["Projects", PanelsTopLeft],
@@ -60,18 +61,16 @@ const nav = [
   ["YouTube", ChartNoAxesCombined],
 ] as const;
 export default function App() {
+  const { page, setPage, activeId, setActiveId, collapsed, setCollapsed } =
+    useSession();
   const [state, setState] = useState<State>(emptyState),
-    [page, setPage] = useState(localStorage.getItem("page") || "Home"),
-    [activeId, setActiveId] = useState(
-      localStorage.getItem("activeProject") || "",
-    ),
     [modal, setModal] = useState(""),
     [toast, setToast] = useState(""),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("All"),
     [channel, setChannel] = useState(""),
-    [collapsed, setCollapsed] = useState(false),
     [loading, setLoading] = useState(true);
+  const [workspaceName, setWorkspaceName] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const notify = useCallback((message: string) => {
@@ -155,17 +154,24 @@ export default function App() {
           </div>
           <div className="brand-text">
             <strong>
-              framecraft<span>STUDIO</span>
+              creatorize<span>SUITE · PERSONAL</span>
             </strong>
             <small>
               <i /> Local workspace
             </small>
           </div>
         </button>
-        <div className="workspace-switch">
-          <span>Faceless Brand</span>
+        <button
+          className="workspace-switch"
+          title="Switch workspace"
+          onClick={() => setModal("workspaces")}
+        >
+          <span>
+            {state.workspaces?.find((w) => w.id === state.activeWorkspace)
+              ?.name || "Personal workspace"}
+          </span>
           <ChevronDown size={14} />
-        </div>
+        </button>
         <button className="search-launch" onClick={() => setModal("search")}>
           <Search size={16} />
           <span>Search or jump to…</span>
@@ -274,7 +280,7 @@ export default function App() {
                 },
                 {
                   title: "Find your style",
-                  sub: "Five distinct ways to tell a story",
+                  sub: "Seven distinct ways to tell a story",
                   icon: SlidersHorizontal,
                   click: () => setPage("Styles"),
                 },
@@ -674,6 +680,69 @@ export default function App() {
           </footer>
         </Modal>
       )}
+      {modal === "workspaces" && (
+        <Modal title="Your workspaces" onClose={() => setModal("")}>
+          <div className="modal-body">
+            <p>
+              Keep each brand’s projects, channels and routines together.
+              Background jobs continue when you switch.
+            </p>
+            {(state.workspaces || []).map((workspace) => (
+              <Button
+                key={workspace.id}
+                primary={workspace.id === state.activeWorkspace}
+                onClick={async () => {
+                  const result = await act(() =>
+                    api(`/workspaces/${workspace.id}/select`, "POST"),
+                  );
+                  if (result) {
+                    setActiveId("");
+                    setPage("Home");
+                    setChannel("");
+                    setModal("");
+                  }
+                }}
+              >
+                {workspace.name}
+                {workspace.id === state.activeWorkspace ? " · active" : ""}
+              </Button>
+            ))}
+            <label>
+              New workspace name
+              <input
+                aria-label="New workspace name"
+                value={workspaceName}
+                onChange={(e) => setWorkspaceName(e.target.value)}
+                maxLength={80}
+              />
+            </label>
+          </div>
+          <footer>
+            <Button onClick={() => setModal("")}>Close</Button>
+            <Button
+              primary
+              disabled={!workspaceName.trim()}
+              onClick={async () => {
+                const created = await act(() =>
+                  api("/workspaces", "POST", { name: workspaceName }),
+                );
+                if (created) {
+                  await act(() =>
+                    api(`/workspaces/${created.id}/select`, "POST"),
+                  );
+                  setWorkspaceName("");
+                  setActiveId("");
+                  setPage("Home");
+                  setChannel("");
+                  setModal("");
+                }
+              }}
+            >
+              Create workspace
+            </Button>
+          </footer>
+        </Modal>
+      )}
       {modal === "search" && (
         <Modal title="Jump to anything" onClose={() => setModal("")}>
           <div className="modal-body command-palette">
@@ -840,10 +909,18 @@ function NewProject({
               </label>
               <label>
                 Look
-                <input
+                <select
                   value={data.look}
                   onChange={(e) => set("look", e.target.value)}
-                />
+                >
+                  {(
+                    state.styles.find((s) => s.id === data.style)?.looks || [
+                      data.look,
+                    ]
+                  ).map((look: string) => (
+                    <option key={look}>{look}</option>
+                  ))}
+                </select>
               </label>
               <label>
                 Target length

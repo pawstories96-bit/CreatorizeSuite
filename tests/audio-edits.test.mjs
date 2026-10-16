@@ -1,0 +1,38 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { Store, uid, run, validateScene } from "../server/core.mjs";
+import { protectedPauses, trimPlan, mapEditedTime, analyzeSilence, applySilenceTrim } from "../server/audio-edits.mjs";
+test("pause cuts protect spoken words and retain smooth join margins", () => {
+  const pauses = protectedPauses([{ start: 0, end: 5 }], [{ start: 1, end: 2 }, { start: 3, end: 4 }]);
+  assert.ok(pauses.every(p => p.end <= 0.94 || (p.start >= 2.06 && p.end <= 2.94) || p.start >= 4.06));
+  const plan = trimPlan(5, pauses, 100);
+  assert.ok(plan.segments.every(s => s.crossfade <= 0.02));
+  assert.ok(mapEditedTime(3, plan) > mapEditedTime(2, plan));
+  assert.throws(() => trimPlan(5, pauses, 120), /reduction/);
+});
+test("real silence detection and trimming retime words, scenes, cues and camera cuts without losing source media", async () => {
+  const store = await new Store().init(path.resolve(".test-audio-edits-" + uid()));
+  const p = await store.create({ title: "Internal silence verification" }), dir = store.projectDir(p.id);
+  const source = path.join(dir, "audio", "source.wav");
+  await run("ffmpeg", ["-y", "-f", "lavfi", "-i", "aevalsrc=exprs='if(between(t,0,0.7)+between(t,1.9,2.6)+between(t,3.5,4.2),0.2*sin(2*PI*440*t),0)':s=48000:d=4.2", "-ac", "1", source]);
+  p.audio = "audio/source.wav"; p.sourceVideo = "assets/camera.mp4"; p.durationSec = 4.2;
+  p.words = [{ w: "One", start: 0.02, end: 0.68 }, { w: "Two", start: 1.92, end: 2.58 }, { w: "Three", start: 3.52, end: 4.18 }];
+  p.shots = [{ id: "s001", start: 0, end: 4.2, scene: validateScene({ elements: [{ id: "circle", type: "circle", radius: 30, keyframes: [{ time: 0, x: 100 }, { time: 3.52, x: 600 }] }] }) }];
+  p.timeline = { cues: [{ id: "cue", shotId: "s001", elementId: "circle", time: 3.52 }], cards: [{ id: "card", start: 1.92, end: 2.58 }], audio: [] };
+  store.saveProject(p);
+  const analysis = await analyzeSilence(store, p);
+  assert.equal(analysis.pauses.length, 2);
+  const plan = await applySilenceTrim(store, p, { id: uid(), options: { analysisId: analysis.id, reduction: 75 } });
+  assert.ok(p.durationSec < 3);
+  const actual = Number((await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path.join(dir, p.audio)])).stdout);
+  assert.ok(Math.abs(actual - p.durationSec) < 0.002);
+  assert.equal(p.words.length, 3); assert.ok(p.words[1].start < 1.5);
+  assert.equal(p.timeline.cues[0].time, p.words[2].start);
+  assert.equal(p.shots[0].scene.elements[0].keyframes[1].time, p.words[2].start);
+  assert.equal(p.shots[0].end, plan.duration); assert.equal(p.cameraCuts.length, 3);
+  assert.ok(fs.existsSync(source)); assert.ok(fs.existsSync(path.join(dir, "audio", "script_timed.txt")));
+  const stale = await analyzeSilence(store, p); fs.appendFileSync(path.join(dir, p.audio), Buffer.from([0, 0]));
+  await assert.rejects(applySilenceTrim(store, p, { id: uid(), options: { analysisId: stale.id } }), /changed/);
+});

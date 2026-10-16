@@ -1,0 +1,16 @@
+export const engineGuide = `
+## Creatorize graphics runtime
+Use coherent physical geometry and specific assemblies, never generic blocks standing in for real subjects. Return a complete declarative scene which the shared Three.js/Canvas engine renders in real time.
+2D character2d elements have width/height in screen coordinates, expression, pose idle/walk/run/sit/point/fall, and rig2d:{skin,hair,shirt,trousers,shoes,outline,headScale:0.7..1.3,bodyScale:0.75..1.2,limbScale:0.8..1.15,hairStyle:short/bob/curly/none,accessory:none/glasses/hat,silhouette:human/robot/stick}. These are real articulated rigs with deterministic idle/blink animation. Reuse saved character designs; keep their palette and proportions consistent across shots. Use images only for actual imported reusable sprites.
+Additional 3D element types:
+Use search_models/download_model to retrieve real licensed CC0 props when they fit the story. These tools return a verified local GLB and dimensions; never invent paths. Keep subject-specific machinery connected with procedural geometry around real props.
+- tube: points:[{x,y,z},...] in element-local world units and tubeRadius. Use exact port coordinates to connect pipes, cables, rails and wire runs. Include flanges/valves with torus/cylinder geometry where appropriate.
+- torus: radius and tubeRadius; capsule: radius and height; plane: width/height in its local XY plane; extrusion: closed points[{x,y,z?}] footprint and depth.
+- water: horizontal reflective plane with width/height and deterministic ripple animation. Place at waterline; model hulls, piers and terrain around it, with correct contact.
+- mannequin: height in meters, role actor/protagonist/bystander/neutral, pose idle/walk/run/sit/point/fall, expression neutral/happy/sad/surprised/angry. Position y is the feet. Every figure has articulated limbs, head and body; low-poly figures also have faces.
+- particles: deterministic burst with seed, particleCount<=1200, radius, speed, gravity, delay and duration. Use only at causally correct event times. Pair impacts with keyframed geometry and matching sound cues.
+- evidence-board: width,height,depth,seed; procedural cards and connected red strings. Add story-specific readable labels/images as separate elements; never invent photographic evidence.
+All 3D elements support rotation3d:{x,y,z} in DEGREES. Scalar rotation animates Y on top of rotation3d. material:{roughness,metalness,emissive,emissiveIntensity,transmission,thickness,flatShading,wireframe,fresnel}; role controls red/blue/cyan actors. highlight:true adds a yellow outline. Do not use emissive glow unless the story requires it.
+Text may use anchor3d:{x,y,z} with x/y screen coordinates to draw a leader-line callout at the correct world point. Keep labels short, readable and clear of key geometry.
+scene.effects supports ssao:boolean, bloom:0..3, grain:0..1, outline:boolean, ps1:boolean and fog:{color,near,far}. Prefer subtle physical light. Build static local geometry first, then animate meaningful object actions with sparse keyframes and camera motion; time everything to narration and cues. Coordinates and dimensions must use one consistent scale. Preserve unique stable IDs for object editing.
+`;

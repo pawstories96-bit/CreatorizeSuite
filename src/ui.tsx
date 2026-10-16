@@ -1,5 +1,6 @@
 import { X, ArrowUpRight, Film, LoaderCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState } from "react";
+import type { ReactNode, MouseEventHandler } from "react";
 export function Button({
   children,
   onClick,
@@ -11,7 +12,7 @@ export function Button({
   className = "",
 }: {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
   primary?: boolean;
   small?: boolean;
   disabled?: boolean;
@@ -143,10 +144,13 @@ export function StyleArt({
   style: string;
   large?: boolean;
 }) {
+  const [live, setLive] = useState(false);
   return (
     <div
       className={`style-art ${style} ${large ? "large" : ""}`}
       aria-hidden="true"
+      onMouseEnter={() => large && setLive(true)}
+      onMouseLeave={() => setLive(false)}
     >
       <div className="sun" />
       <div className="hill h1" />
@@ -163,6 +167,8 @@ export function StyleArt({
         <span />
       </div>
       <div className="art-spark">✳</div>
+      {large && !live && <span className="style-preview-hint">Hover for live preview</span>}
+      {live && <iframe title={`${style} live preview`} className="style-live-preview" src={`/player.html?preview=${encodeURIComponent(style)}&width=${style === "lowpoly" ? 360 : 640}&height=${style === "lowpoly" ? 640 : 360}`} />}
     </div>
   );
 }

@@ -185,6 +185,65 @@ try {
     );
     assert.ok(render.size > 1000);
     console.log("PASS: packaged Chromium and FFmpeg produce a real MP4");
+    const graphics = structuredClone(p);
+    graphics.style = "3d";
+    graphics.baseStyle = "3d";
+    graphics.look = "Studio";
+    graphics.shots[0].scene = validateScene({
+      background: "#d6e0df",
+      camera: { x: 10, y: 7, z: 12 },
+      effects: { ssao: true, bloom: 0.12, grain: 0.03, outline: true },
+      elements: [
+        {
+          id: "water",
+          type: "water",
+          width: 30,
+          height: 30,
+          y: -0.1,
+          fill: "#779ca7",
+        },
+        {
+          id: "rig",
+          type: "mannequin",
+          x: 0,
+          y: 0,
+          z: 0,
+          pose: "walk",
+          role: "protagonist",
+          highlight: true,
+        },
+        {
+          id: "pipe",
+          type: "tube",
+          points: [
+            { x: -3, y: 0, z: 0 },
+            { x: -3, y: 2, z: 0 },
+            { x: -1, y: 2, z: 0 },
+          ],
+          tubeRadius: 0.15,
+          fill: "#aa734e",
+        },
+      ],
+    });
+    const graphicsPage = page
+      .frames()
+      .find((f) => f.url().includes("/player.html"));
+    assert.ok(graphicsPage);
+    const graphicsErrors = [];
+    const onGraphicsError = (e) => graphicsErrors.push(e.message);
+    page.on("pageerror", onGraphicsError);
+    await graphicsPage.evaluate((p) => window.FC.setProject(p), graphics);
+    await graphicsPage.evaluate(() => window.FC.renderFrame(0.5));
+    await page
+      .locator("iframe")
+      .first()
+      .screenshot({ path: "test-results/packaged-graphics.png" });
+    assert.deepEqual(graphicsErrors, []);
+    await graphicsPage.evaluate((p) => window.FC.setProject(p), p);
+    page.off("pageerror", onGraphicsError);
+    console.log(
+      "PASS: packaged Three.js add-ons render reflective water, articulated figures, tubes, SSAO, bloom, grain and outlines",
+    );
     if (process.env.LIVE_PACKAGED_MCP === "1") {
       const edit = await wait(
         await call(`/projects/${p.id}/jobs`, {
@@ -205,9 +264,11 @@ try {
         edit.events.some((e) => e.text === "Agent tool: check_preview"),
       );
       assert.equal(edit.comparisons.length, 1);
+      assert.ok(edit.comparisons[0].beforeClip);
+      assert.ok(edit.comparisons[0].afterClip);
       assert.equal(edit.model, catalog.models[0].id);
       console.log(
-        "PASS: packaged signed-in Codex uses bundled MCP bridge, real preview tools, and before/after captures",
+        "PASS: packaged signed-in Codex uses bundled MCP bridge, real preview tools, and before/after PNG and MP4 captures",
       );
     }
     const voice = await call("/projects", {

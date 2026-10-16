@@ -23,7 +23,7 @@ export function estimateUsage(usage, provider, model, settings) {
     (settings.inputPrice != null || settings.outputPrice != null
       ? { input: settings.inputPrice, output: settings.outputPrice }
       : null);
-  const billing = provider === "api" ? "metered" : "subscription";
+  const billing = ["api", "anthropic"].includes(provider) ? "metered" : "subscription";
   if (!price || price.input == null || price.output == null) return { billing };
   const cached = Math.min(usage.input_tokens, usage.cached_input_tokens || 0);
   const written = Math.min(
