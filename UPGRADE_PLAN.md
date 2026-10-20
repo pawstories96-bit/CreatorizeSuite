@@ -1,6 +1,14 @@
 # Creatorize Suite implementation plan
 
-Updated 2026-10-16 from the user's revised brief. One application; no seeded example projects. Existing user projects and credentials must remain usable.
+Updated 2026-10-20 from the user's revised brief. One application; no seeded example projects. Existing user projects and credentials must remain usable.
+
+## Latest checkpoint — reconstruction, crew and Mixamo
+
+The [October update audit](docs/update-video-audit.md) records the full 14:30 transcript and five-second visual-timeline review. Implemented: shared production sets, actual credited CC0 acquisition/usage checks, per-shot independent Verified review, 1–3 scoped concurrent builders with resumable accepted shots, consistent cast controls, fifteen actions, finger grips/eight props, ten named cameras and bounded export repair.
+
+Mixamo uses actual imported skinned meshes rather than the procedural fallback. Folder import supports the user's eight FBX files, including large embedded textures and legacy FBX 6 conversion. X Bot/Y Bot populate reusable female/male slots. Per-role models, material finishes/colors, humanoid actions, imported motion and hand props work on supported Mixamo rigs. Local conversion caching and deterministic seeking are verified. Source meshes remain outside the shipped app and repository.
+
+Remaining reference gaps: the complete 131-motion library; separate concurrent AI asset-scout/prop-design roles; universal arbitrary-rig retargeting and facial animation; full-documentary visual acceptance. The external-service gaps listed later remain open. Project-level tests and short real exports do not certify end-to-end parity with the reference videos.
 
 ## Reference review
 

@@ -17,6 +17,7 @@ import {
   validateWords,
   validateScene,
   validateStyleParams,
+  validateCast,
   topo,
   allowedLicense,
 } from "./core.mjs";
@@ -43,6 +44,9 @@ import { searchModels, downloadModel } from "./models.mjs";
 import { fetchMap } from "./maps.mjs";
 import { imageCatalog } from "./cloud-images.mjs";
 import { FlowBridge } from "./flow-bridge.mjs";
+import { cameraMoves } from "../public/lib/cameras.js";
+import { castRole, defaultCast } from "../public/lib/cast.js";
+import { legacyFBX, convertLegacyFBX } from "./rig-converter.mjs";
 const appRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -489,7 +493,8 @@ export async function startServer(options = {}) {
   route("patch", "/api/projects/:id", async (req, res) => {
     const p = store.project(req.params.id);
     if (
-      [...pipeline.active.values()].some((j) => j.projectId === p.id) &&
+      ([...pipeline.active.values()].some((j) => j.projectId === p.id) ||
+        pipeline.externalLocks.has(p.id)) &&
       Object.keys(req.body).some((k) => k !== "notes")
     )
       throw Error(
@@ -513,6 +518,31 @@ export async function startServer(options = {}) {
       p.styleParams = validateStyleParams(req.body.styleParams);
       p.lastExport = null;
       p.pipeline.exported = "pending";
+    }
+    if ("cast" in req.body) {
+      const cast = validateCast(req.body.cast);
+      for (const choice of Object.values(cast))
+        if (
+          choice.src &&
+          !fs.existsSync(safePath(store.projectDir(p.id), choice.src))
+        )
+          throw Error("Import the character GLB into this project first");
+      p.cast = cast;
+      p.visionQA = "pending";
+      for (const shot of p.shots) delete shot.visionQA;
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
+      p.needsReview = true;
+    }
+    if ("castMode" in req.body) {
+      if (!["mixamo", "procedural"].includes(req.body.castMode))
+        throw Error("Choose Mixamo or procedural characters");
+      p.castMode = req.body.castMode;
+      p.visionQA = "pending";
+      for (const shot of p.shots) delete shot.visionQA;
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
+      p.needsReview = true;
     }
     for (const k of allowed) if (k in req.body) p[k] = req.body[k];
     if ("script" in req.body && req.body.script !== p.script) {
@@ -542,6 +572,148 @@ export async function startServer(options = {}) {
     }
     store.saveProject(p);
     await store.commit(p.id, "Save project changes");
+    res.json(p);
+  });
+  route("post", "/api/projects/:id/update-engine", async (req, res) => {
+    const p = store.project(req.params.id);
+    if (
+      [...pipeline.active.values()].some((j) => j.projectId === p.id) ||
+      pipeline.externalLocks.has(p.id)
+    )
+      throw Error("Stop the active job before updating the character engine");
+    const cast = { ...defaultCast, ...p.cast };
+    for (const shot of p.shots) {
+      if (!shot.scene) continue;
+      shot.scene = validateScene(shot.scene);
+      for (const e of shot.scene.elements)
+        if (e.type === "mannequin") {
+          e.castRole = castRole(e);
+          if (!p.cast?.[e.castRole])
+            cast[e.castRole] = {
+              body: e.body,
+              finish: p.look === "Investigation" ? "glossy" : e.finish,
+              color:
+                {
+                  actor: "#ef4444",
+                  protagonist: "#3b82f6",
+                  bystander: "#67e8f9",
+                }[e.role] ||
+                (/^#[0-9a-f]{6}$/i.test(e.fill) ? e.fill : "#eff0ef"),
+            };
+        }
+      delete shot.visionQA;
+      atomic(
+        path.join(store.projectDir(p.id), "scenes", shot.id + ".json"),
+        shot.scene,
+      );
+      atomic(
+        path.join(store.projectDir(p.id), "scenes", shot.id + ".js"),
+        `export default ${JSON.stringify(shot.scene, null, 2)};\n`,
+      );
+    }
+    p.cast = validateCast(cast);
+    p.engineVersion = 3;
+    p.visionQA = "pending";
+    p.needsReview = true;
+    p.lastExport = null;
+    p.pipeline.exported = "pending";
+    store.saveProject(p);
+    await store.commit(
+      p.id,
+      "Update character engine and preserve role colors",
+    );
+    res.json(p);
+  });
+  route("post", "/api/projects/:id/actor-action", async (req, res) => {
+    const p = store.project(req.params.id);
+    if (
+      [...pipeline.active.values()].some((j) => j.projectId === p.id) ||
+      pipeline.externalLocks.has(p.id)
+    )
+      throw Error("Stop the active job before changing character actions");
+    const shot = p.shots.find((s) => s.id === req.body.shotId);
+    if (!shot?.scene) throw Error("Choose a built shot");
+    let changed = 0;
+    if (
+      req.body.motionSrc &&
+      !(p.motions || []).some((m) => m.path === req.body.motionSrc)
+    )
+      throw Error("Choose an imported project motion");
+    shot.scene = validateScene({
+      ...shot.scene,
+      elements: shot.scene.elements.map((e) => {
+        if (e.type !== "mannequin" || castRole(e) !== req.body.role) return e;
+        changed++;
+        return {
+          ...e,
+          pose: req.body.pose,
+          heldProp: req.body.heldProp || undefined,
+          motionSrc: req.body.motionSrc || undefined,
+        };
+      }),
+    });
+    if (!changed)
+      throw Error("This role has no built-in mannequin in the current shot");
+    delete shot.visionQA;
+    p.visionQA = "pending";
+    p.needsReview = true;
+    p.lastExport = null;
+    p.pipeline.exported = "pending";
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".json"),
+      shot.scene,
+    );
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".js"),
+      `export default ${JSON.stringify(shot.scene, null, 2)};\n`,
+    );
+    store.saveProject(p);
+    await store.commit(p.id, "Set character action in " + shot.id);
+    res.json(p);
+  });
+  route("post", "/api/projects/:id/camera", async (req, res) => {
+    const p = store.project(req.params.id);
+    if (
+      [...pipeline.active.values()].some((j) => j.projectId === p.id) ||
+      pipeline.externalLocks.has(p.id)
+    )
+      throw Error("Stop the active job before changing the camera");
+    const shot = p.shots.find((s) => s.id === req.body.shotId);
+    if (!shot?.scene) throw Error("Choose a built shot");
+    if (!cameraMoves.some(([id]) => id === req.body.preset))
+      throw Error("Choose a named camera move");
+    const target = shot.scene.cameraRig?.target || { x: 0, y: 1, z: 0 },
+      from = shot.scene.camera || { x: 12, y: 10, z: 18 },
+      dx = from.x - target.x,
+      dz = from.z - target.z;
+    shot.scene = validateScene({
+      ...shot.scene,
+      cameraRig: {
+        type: "dolly",
+        preset: req.body.preset,
+        target,
+        distance: Math.max(0.5, Math.hypot(dx, dz)),
+        height: from.y - target.y,
+        azimuth: (Math.atan2(dx, dz) * 180) / Math.PI,
+        duration: shot.end - shot.start,
+        easing: "smooth",
+      },
+    });
+    delete shot.visionQA;
+    p.visionQA = "pending";
+    p.needsReview = true;
+    p.lastExport = null;
+    p.pipeline.exported = "pending";
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".json"),
+      shot.scene,
+    );
+    atomic(
+      path.join(store.projectDir(p.id), "scenes", shot.id + ".js"),
+      `export default ${JSON.stringify(shot.scene, null, 2)};\n`,
+    );
+    store.saveProject(p);
+    await store.commit(p.id, "Apply camera move: " + req.body.preset);
     res.json(p);
   });
   route("post", "/api/projects/:id/duplicate", async (req, res) => {
@@ -1143,6 +1315,175 @@ export async function startServer(options = {}) {
         [],
       ),
     ),
+  );
+  app.post(
+    "/api/projects/:id/rig-import",
+    upload.single("file"),
+    async (req, res, next) => {
+      let page,
+        p,
+        locked = false;
+      try {
+        p = store.project(req.params.id);
+        if (
+          [...pipeline.active.values()].some((j) => j.projectId === p.id) ||
+          pipeline.externalLocks.has(p.id)
+        )
+          throw Error(
+            "Stop the active job before importing characters or motions",
+          );
+        if (
+          !req.file ||
+          req.file.size > 150 * 1024 * 1024 ||
+          !/\.(fbx|glb)$/i.test(req.file.originalname)
+        )
+          throw Error("Choose a self-contained FBX or GLB up to 150 MB");
+        pipeline.externalLocks.add(p.id);
+        locked = true;
+        if (!["character", "motion"].includes(req.body.kind))
+          throw Error("Choose a character or motion import");
+        const character = req.body.kind === "character",
+          name = String(
+            req.body.name || path.parse(req.file.originalname).name,
+          ).slice(0, 100),
+          bytes = fs.readFileSync(req.file.path),
+          hash = crypto.createHash("sha256").update(bytes).digest("hex"),
+          cacheDir = path.join(store.root, "rig-cache"),
+          cacheModel = path.join(cacheDir, hash + ".glb"),
+          cacheMeta = character
+            ? read(path.join(cacheDir, hash + ".json"), null)
+            : null;
+        let result;
+        if (cacheMeta?.version === 1 && fs.existsSync(cacheModel))
+          result = {
+            ...cacheMeta,
+            encoded: fs.readFileSync(cacheModel).toString("base64"),
+          };
+        else {
+          const oldFBX =
+              /\.fbx$/i.test(req.file.originalname) && legacyFBX(bytes),
+            input = oldFBX
+              ? await convertLegacyFBX(bytes, path.join(root, "incoming"))
+              : bytes;
+          const browser = await pipeline.browserInstance();
+          page = await browser.newPage();
+          await page.goto(pipeline.base + "/motion-import.html", {
+            waitUntil: "domcontentloaded",
+            timeout: 90000,
+          });
+          await page.waitForFunction(() => window.ready, null, {
+            timeout: 90000,
+          });
+          result = await page.evaluate((data) => window.importRig(data), {
+            encoded: input.toString("base64"),
+            format: oldFBX
+              ? "glb"
+              : path.extname(req.file.originalname).slice(1).toLowerCase(),
+            name,
+            character,
+          });
+          if (character) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+            atomic(cacheModel, Buffer.from(result.encoded, "base64"));
+            atomic(path.join(cacheDir, hash + ".json"), {
+              version: 1,
+              bones: result.bones,
+              clips: result.clips,
+            });
+          }
+        }
+        const rel = `assets/${hash.slice(0, 24)}${character ? ".glb" : ".motion.json"}`;
+        if (character && (req.body.body || req.body.source === "mixamo")) {
+          if (req.body.body && !["male", "female"].includes(req.body.body))
+            throw Error("Choose male or female body");
+          if (Object.keys(result.bones || {}).length < 12)
+            throw Error(
+              "This body needs a standard humanoid skeleton. Download the character With Skin from Mixamo.",
+            );
+        }
+        if (character)
+          fs.writeFileSync(
+            safePath(store.projectDir(p.id), rel),
+            Buffer.from(result.encoded, "base64"),
+          );
+        else atomic(safePath(store.projectDir(p.id), rel), result);
+        const record = {
+            path: rel,
+            name,
+            license: req.body.source === "mixamo" ? "Mixamo" : "user-owned",
+            author: req.body.source === "mixamo" ? "Adobe / Mixamo" : "User",
+            source:
+              req.body.source === "mixamo"
+                ? "https://www.mixamo.com/"
+                : "Local " +
+                  (character ? "character" : "animation") +
+                  " import",
+            retrievedAt: new Date().toISOString(),
+            sourceHash: hash,
+            ...(character && req.body.source === "mixamo"
+              ? { humanoid: true }
+              : {}),
+            ...(character
+              ? { skeleton: result.bones, clips: result.clips }
+              : { duration: result.duration, mapping: result.mapping }),
+          },
+          ledgerPath = path.join(
+            store.projectDir(p.id),
+            "assets",
+            "ATTRIBUTIONS.json",
+          ),
+          ledger = read(ledgerPath, []);
+        atomic(ledgerPath, [...ledger.filter((a) => a.path !== rel), record]);
+        if (!character) {
+          p.motions = [
+            ...(p.motions || []).filter((m) => m.path !== rel),
+            record,
+          ];
+          store.saveProject(p);
+          await store.commit(p.id, "Import humanoid motion: " + name);
+        }
+        if (character && req.body.body) {
+          p.characterModels = {
+            ...(p.characterModels || {}),
+            [req.body.body]: record,
+          };
+          p.lastExport = null;
+          p.pipeline.exported = "pending";
+          p.visionQA = "pending";
+          p.needsReview = true;
+          for (const shot of p.shots) delete shot.visionQA;
+          const workspaceId = p.workspaceId || "personal",
+            storedPath = `character-bodies/${crypto.createHash("sha256").update(workspaceId).digest("hex").slice(0, 20)}/${hash.slice(0, 24)}.glb`,
+            destination = safePath(store.root, storedPath);
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.copyFileSync(safePath(store.projectDir(p.id), rel), destination);
+          store.put("characterBodies", {
+            ...record,
+            id: workspaceId + ":" + req.body.body,
+            workspaceId,
+            body: req.body.body,
+            storedPath,
+          });
+          store.saveProject(p);
+          await store.commit(p.id, "Import " + req.body.body + " Mixamo body");
+        }
+        await page?.close();
+        page = null;
+        pipeline.externalLocks.delete(p.id);
+        locked = false;
+        pipeline.pump();
+        res.json(record);
+      } catch (e) {
+        next(e);
+      } finally {
+        await page?.close().catch(() => {});
+        if (req.file) fs.unlinkSync(req.file.path);
+        if (locked) {
+          pipeline.externalLocks.delete(p.id);
+          pipeline.pump();
+        }
+      }
+    },
   );
   app.post(
     "/api/projects/:id/asset",

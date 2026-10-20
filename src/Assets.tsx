@@ -62,6 +62,64 @@ export default function Assets({
             Import your media
           </Button>
         </div>
+        {tab === "Library" &&
+          ((project.baseStyle || project.style) === "3d" ||
+            assets.some((a) => a.path?.endsWith(".glb"))) && (
+            <section className="notice">
+              <strong>
+                {assets.filter((a) => a.path?.endsWith(".glb")).length} imported
+                3D models ·{" "}
+                {
+                  project.shots.filter((s) =>
+                    s.scene?.elements?.some((e: any) => e.type === "model"),
+                  ).length
+                }{" "}
+                shots use imported models
+              </strong>
+              {project.production ? (
+                <details>
+                  <summary>
+                    3D production plan · {project.production.status}
+                  </summary>
+                  <p>
+                    {project.production.note ||
+                      "Shared environments and model decisions for this video."}
+                  </p>
+                  {project.production.error && (
+                    <p>{project.production.error}</p>
+                  )}
+                  {project.production.sets?.map((set: any) => (
+                    <p key={set.id}>
+                      <strong>{set.name}</strong> — {set.description}
+                    </p>
+                  ))}
+                  {project.production.choices?.map((a: any) => (
+                    <p key={a.key}>
+                      <strong>{a.key}</strong> ·{" "}
+                      {a.id ? "Catalog model" : "Bespoke geometry"}: {a.reason}
+                    </p>
+                  ))}
+                  {project.production.shots?.map((s: any) => (
+                    <p key={s.shotId}>
+                      <strong>
+                        {s.shotId} · {s.kind}
+                      </strong>{" "}
+                      — {s.focus}
+                      <br />
+                      Camera: {s.camera}
+                      <br />
+                      Action: {s.action}
+                    </p>
+                  ))}
+                </details>
+              ) : (
+                <p>
+                  No shared 3D production plan yet. Studio builds now plan
+                  environments and retrieve models before creating shots.
+                </p>
+              )}
+            </section>
+          )}
         {tab === "Maps" && (
           <MapImporter
             project={project}
@@ -111,7 +169,7 @@ export default function Assets({
             </form>
             <p className="form-hint">
               {tab === "3D Models"
-                ? "Poly Haven CC0 models. Geometry and textures are verified and embedded into a local GLB. Source, creator and license are saved."
+                ? "Official Kenney and Poly Haven CC0 catalogs: ships, vegetation, vehicles, environments and props. Geometry, native dimensions, source, creator and license are saved locally. Generic catalog props are not exact historical replicas."
                 : "Only public-domain, CC0, CC-BY and CC-BY-SA images and footage are included. Source and attribution are saved with every download."}
             </p>
           </>
@@ -120,7 +178,7 @@ export default function Assets({
           <div className="asset-grid">
             {(tab === "Library" ? assets : results).map((a) => (
               <div className="asset-card" key={a.path || a.id}>
-                {tab === "3D Models" ||
+                {(tab === "3D Models" && a.preview) ||
                 /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.path || a.url) ? (
                   <img
                     src={tab === "Library" ? media(project, a.path) : a.preview}
@@ -135,6 +193,19 @@ export default function Assets({
                   <strong>{a.name}</strong>
                   <Badge>{a.license}</Badge>
                   <small>{a.author}</small>
+                  {tab === "Library" && a.path?.endsWith(".glb") && (
+                    <small>
+                      Used in{" "}
+                      {project.shots
+                        .filter((s) =>
+                          s.scene?.elements?.some(
+                            (e: any) => e.type === "model" && e.src === a.path,
+                          ),
+                        )
+                        .map((s) => s.id)
+                        .join(", ") || "no shots yet"}
+                    </small>
+                  )}
                   <div className="row">
                     {tab === "Library" ? (
                       <Button

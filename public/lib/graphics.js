@@ -7,6 +7,8 @@ import { UnrealBloomPass } from "/three-addons/postprocessing/UnrealBloomPass.js
 import { FilmPass } from "/three-addons/postprocessing/FilmPass.js";
 import { OutlinePass } from "/three-addons/postprocessing/OutlinePass.js";
 import { OutputPass } from "/three-addons/postprocessing/OutputPass.js";
+import { createContainerVessel } from "./vessels.js";
+import { createMannequin } from "./mannequins.js";
 const rad = (value) => (value * Math.PI) / 180;
 export const seeded = (seed, index) => {
   const n = Math.sin(seed * 127.1 + index * 311.7) * 43758.5453;
@@ -58,110 +60,137 @@ export function createMaterial(e, project) {
   }
   return m;
 }
-function actor(e, project) {
+function building3d(e, project) {
   const root = new THREE.Group(),
+    w = e.width,
     h = e.height,
-    s = h / 1.8;
-  const mat = createMaterial(e, project),
-    joints = {};
-  const part = (name, geometry, x, y, z, parent = root) => {
-    const mesh = new THREE.Mesh(geometry, mat);
-    mesh.position.set(x * s, y * s, z * s);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    parent.add(mesh);
-    mesh.userData.part = name;
-    return mesh;
+    d = e.depth,
+    settings = e.building || {};
+  const wall = createMaterial(e, project),
+    roof = new THREE.MeshStandardMaterial({
+      color: settings.roofColor || "#515c65",
+      roughness: 0.92,
+    });
+  const add = (geometry, material, x, y, z) => {
+    const m = new THREE.Mesh(geometry, material);
+    m.position.set(x, y, z);
+    m.castShadow = m.receiveShadow = true;
+    root.add(m);
+    return m;
   };
-  part(
-    "torso",
-    new THREE.CapsuleGeometry(0.19 * s, 0.35 * s, 4, 8),
-    0,
-    1.12,
-    0,
-  );
-  part(
-    "head",
-    new THREE.SphereGeometry(
-      0.145 * s,
-      project.style === "lowpoly" ? 8 : 20,
-      12,
+  add(new THREE.BoxGeometry(w, h, d), wall, 0, h / 2, 0);
+  add(new THREE.BoxGeometry(w + 0.18, 0.25, d + 0.18), roof, 0, 0.125, 0);
+  add(new THREE.BoxGeometry(w + 0.6, 0.25, d + 0.6), roof, 0, h + 0.125, 0);
+  const floors =
+      settings.floors || Math.max(1, Math.min(12, Math.floor(h / 3.2))),
+    windows = [];
+  for (const [span, axis, side] of [
+    [w, "z", -1],
+    [w, "z", 1],
+    [d, "x", -1],
+    [d, "x", 1],
+  ]) {
+    const columns = Math.max(1, Math.min(20, Math.floor(span / 3)));
+    for (let floor = 0; floor < floors; floor++)
+      for (let column = 0; column < columns; column++) {
+        const horizontal = ((column + 0.5) / columns) * span - span / 2,
+          y = ((floor + 0.58) / floors) * h;
+        if (
+          floor === 0 &&
+          axis === "z" &&
+          side === 1 &&
+          Math.abs(horizontal) < 1.8
+        )
+          continue;
+        windows.push({
+          x: axis === "x" ? side * (w / 2 + 0.025) : horizontal,
+          y,
+          z: axis === "z" ? side * (d / 2 + 0.025) : horizontal,
+          rotation: axis === "x" ? Math.PI / 2 : 0,
+        });
+      }
+  }
+  const glass = new THREE.MeshStandardMaterial({
+    color: settings.windowColor || "#526c7c",
+    roughness: 0.28,
+    metalness: 0.15,
+    side: THREE.DoubleSide,
+  });
+  const frames = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1.55, 1.55, 0.08),
+      roof,
+      windows.length,
     ),
+    panes = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1.3, 1.3),
+      glass,
+      windows.length,
+    ),
+    dummy = new THREE.Object3D();
+  windows.forEach((v, i) => {
+    dummy.position.set(v.x, v.y, v.z);
+    dummy.rotation.y = v.rotation;
+    dummy.updateMatrix();
+    frames.setMatrixAt(i, dummy.matrix);
+    dummy.position[v.rotation ? "x" : "z"] +=
+      (v.rotation ? Math.sign(v.x) : Math.sign(v.z)) * 0.05;
+    dummy.updateMatrix();
+    panes.setMatrixAt(i, dummy.matrix);
+  });
+  frames.castShadow = frames.receiveShadow = true;
+  root.add(frames, panes);
+  const doorWidth = Math.min(w * 0.3, settings.kind === "warehouse" ? 4 : 1.5),
+    doorHeight = Math.min(h * 0.75, settings.kind === "warehouse" ? 3.5 : 2.3);
+  add(
+    new THREE.BoxGeometry(doorWidth, doorHeight, 0.12),
+    roof,
     0,
-    1.64,
-    0,
+    doorHeight / 2,
+    d / 2 + 0.07,
   );
-  for (const side of [-1, 1]) {
-    const leg = new THREE.Group();
-    leg.position.set(side * 0.11 * s, 0.85 * s, 0);
-    root.add(leg);
-    part(
-      "leg",
-      new THREE.CapsuleGeometry(0.075 * s, 0.62 * s, 4, 8),
-      0,
-      -0.4,
-      0,
-      leg,
-    );
-    joints[`leg${side}`] = leg;
-    part(
-      "foot",
-      new THREE.BoxGeometry(0.15 * s, 0.13 * s, 0.26 * s),
-      0,
-      -0.785,
-      0.045,
-      leg,
-    );
-    const arm = new THREE.Group();
-    arm.position.set(side * 0.27 * s, 1.38 * s, 0);
-    root.add(arm);
-    part(
-      "arm",
-      new THREE.CapsuleGeometry(0.06 * s, 0.47 * s, 4, 8),
-      0,
-      -0.28,
-      0,
-      arm,
-    );
-    joints[`arm${side}`] = arm;
-  }
-  if (project.style === "lowpoly") {
-    const face = new THREE.MeshBasicMaterial({ color: "#17202b" });
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(
-        new THREE.SphereGeometry(0.016 * s, 6, 6),
-        face,
+  if (settings.kind === "warehouse")
+    for (let i = 1; i < 6; i++)
+      add(
+        new THREE.BoxGeometry(doorWidth, 0.035, 0.02),
+        wall,
+        0,
+        (i / 6) * doorHeight,
+        d / 2 + 0.14,
       );
-      eye.position.set(side * 0.05 * s, 1.66 * s, 0.135 * s);
-      root.add(eye);
-    }
-    const mouth = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        0.065 * s,
-        (e.expression === "surprised" ? 0.05 : 0.014) * s,
-        0.012 * s,
-      ),
-      face,
+  for (let i = 0; i < Math.min(4, Math.ceil(w / 8)); i++)
+    add(
+      new THREE.BoxGeometry(1.2, 0.65, 1.1),
+      roof,
+      -w * 0.3 + i * 2,
+      h + 0.55,
+      -d * 0.2,
     );
-    mouth.position.set(0, 1.58 * s, 0.14 * s);
-    root.add(mouth);
-  }
-  root.userData.animate = (t) => {
-    const gait = ["walk", "run"].includes(e.pose)
-      ? Math.sin(t * (e.pose === "run" ? 10 : 5)) *
-        (e.pose === "run" ? 0.8 : 0.5)
-      : Math.sin(t * 1.8) * 0.018;
-    joints.leg1.rotation.x = gait;
-    joints["leg-1"].rotation.x = -gait;
-    joints.arm1.rotation.x = -gait * 0.7;
-    joints["arm-1"].rotation.x = gait * 0.7;
-    if (e.pose === "point") joints.arm1.rotation.z = -1.25;
-    if (e.pose === "sit") {
-      joints.leg1.rotation.x = -Math.PI / 2;
-      joints["leg-1"].rotation.x = -Math.PI / 2;
+  if (settings.kind === "house") {
+    const slope = Math.atan2(Math.min(w * 0.3, 3), w / 2 + 0.4),
+      length = (w / 2 + 0.4) / Math.cos(slope);
+    const shape = new THREE.Shape();
+    shape.moveTo(-w / 2, 0);
+    shape.lineTo(0, (Math.tan(slope) * w) / 2);
+    shape.lineTo(w / 2, 0);
+    shape.closePath();
+    add(
+      new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false }),
+      wall,
+      0,
+      h,
+      -d / 2,
+    );
+    for (const side of [-1, 1]) {
+      const panel = add(
+        new THREE.BoxGeometry(length, 0.2, d + 0.8),
+        roof,
+        (side * w) / 4,
+        h + (Math.sin(slope) * length) / 2,
+        0,
+      );
+      panel.rotation.z = -side * slope;
     }
-    if (e.pose === "fall") root.rotation.z = Math.min(Math.PI / 2, t * 0.8);
-  };
+  }
   return root;
 }
 function particleSystem(e) {
@@ -234,7 +263,10 @@ function evidenceBoard(e, project) {
   return root;
 }
 export function createGeometryObject(e, project) {
-  if (e.type === "mannequin") return actor(e, project);
+  if (e.type === "vessel3d") return createContainerVessel(e);
+  if (e.type === "building3d") return building3d(e, project);
+  if (e.type === "mannequin")
+    return createMannequin(e, project, createMaterial(e, project));
   if (e.type === "particles") return particleSystem(e);
   if (e.type === "evidence-board") return evidenceBoard(e, project);
   let geometry;
@@ -264,18 +296,21 @@ export function createGeometryObject(e, project) {
     );
   if (e.type === "torus")
     geometry = new THREE.TorusGeometry(e.radius, e.tubeRadius, 12, e.segments);
-  if (e.type === "tube")
+  if (e.type === "tube") {
+    const points = e.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+      path = new THREE.CurvePath();
+    for (let i = 1; i < points.length; i++)
+      path.add(new THREE.LineCurve3(points[i - 1], points[i]));
     geometry = new THREE.TubeGeometry(
-      new THREE.CatmullRomCurve3(
-        e.points.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
-        false,
-        "centripetal",
-      ),
+      e.curve === "smooth"
+        ? new THREE.CatmullRomCurve3(points, false, "centripetal")
+        : path,
       Math.min(200, e.points.length * 12),
       e.tubeRadius,
       10,
       false,
     );
+  }
   if (e.type === "plane" || e.type === "water")
     geometry = new THREE.PlaneGeometry(e.width, e.height);
   if (e.type === "terrain") {
@@ -313,11 +348,71 @@ export function createGeometryObject(e, project) {
     mirror.rotation.x = -Math.PI / 2;
     mirror.userData.fixedRotationX = -Math.PI / 2;
     mirror.material.uniforms.creatorTime = { value: 0 };
-    mirror.material.fragmentShader = mirror.material.fragmentShader
-      .replace("void main()", "uniform float creatorTime;\nvoid main()")
+    mirror.material.uniforms.creatorRoughness = {
+      value: e.material?.roughness ?? 0.32,
+    };
+    const extent = Math.min(e.width, e.height);
+    mirror.material.uniforms.creatorFogColor = {
+      value: new THREE.Color(
+        project.sceneFog?.color ||
+          project.sceneEnvironment?.skyHorizon ||
+          "#d6e1e5",
+      ),
+    };
+    mirror.material.uniforms.creatorFogRange = {
+      value: new THREE.Vector2(
+        project.sceneFog?.near ?? extent * 0.24,
+        project.sceneFog?.far ?? extent * 0.48,
+      ),
+    };
+    mirror.material.uniforms.creatorFogEnabled = {
+      value:
+        project.sceneFog ||
+        (project.sceneEnvironment?.kind === "exterior" && extent >= 500)
+          ? 1
+          : 0,
+    };
+    mirror.material.vertexShader = mirror.material.vertexShader
       .replace(
-        "texture2DProj( tDiffuse, vUv )",
-        "texture2DProj( tDiffuse, vUv + vec4(sin(vUv.y * 90.0 + creatorTime) * 0.0015, cos(vUv.x * 75.0 + creatorTime) * 0.001, 0.0, 0.0) )",
+        "#include <common>",
+        "#include <common>\nvarying vec3 creatorWorld;",
+      )
+      .replace(
+        "vUv = textureMatrix",
+        "creatorWorld = (modelMatrix * vec4(position, 1.0)).xyz;\n vUv = textureMatrix",
+      );
+    mirror.material.fragmentShader = mirror.material.fragmentShader
+      .replace(
+        "void main()",
+        `uniform float creatorTime;
+uniform float creatorRoughness;
+uniform vec3 creatorFogColor;
+uniform vec2 creatorFogRange;
+uniform float creatorFogEnabled;
+varying vec3 creatorWorld;
+void main()`,
+      )
+      .replace(
+        "vec4 base = texture2DProj( tDiffuse, vUv );",
+        `vec2 uv = vUv.xy / vUv.w;
+float wave = sin(creatorWorld.x * .38 + creatorWorld.z * .21 + creatorTime * .7);
+float crossWave = cos(creatorWorld.x * .15 - creatorWorld.z * .42 + creatorTime * .48);
+uv += vec2(wave, crossWave) * .002;
+vec2 blur = vec2(.0007 + creatorRoughness * .003);
+vec4 base = texture2D(tDiffuse, uv) * .4
+ + texture2D(tDiffuse, uv + vec2(blur.x, 0.0)) * .15
+ + texture2D(tDiffuse, uv - vec2(blur.x, 0.0)) * .15
+ + texture2D(tDiffuse, uv + vec2(0.0, blur.y)) * .15
+ + texture2D(tDiffuse, uv - vec2(0.0, blur.y)) * .15;`,
+      )
+      .replace(
+        "gl_FragColor = vec4( blendOverlay( base.rgb, color ), 1.0 );",
+        `vec3 eye = normalize(cameraPosition - creatorWorld);
+float fresnel = .18 + .55 * pow(1.0 - abs(eye.y), 3.0);
+vec3 surface = color * (1.0 + (wave + crossWave) * .022);
+vec3 waterColor = mix(surface, base.rgb, fresnel * (1.0 - creatorRoughness * .35));
+float haze = smoothstep(creatorFogRange.x,creatorFogRange.y,length(cameraPosition-creatorWorld))*creatorFogEnabled;
+gl_FragColor = vec4(mix(waterColor,creatorFogColor,haze), 1.0);`,
       );
     mirror.userData.animate = (t) =>
       (mirror.material.uniforms.creatorTime.value = t);

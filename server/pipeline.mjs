@@ -21,6 +21,18 @@ import { publicChannelCatalog, duplicateTopic } from "./channel-catalog.mjs";
 import { validateMetadata } from "./metadata.mjs";
 import { saveRetakeAnalysis, applyRetakes } from "./takes.mjs";
 import { capturePNG } from "./frame-capture.mjs";
+import { runBuildCrew } from "./build-crew.mjs";
+import { applyCastElement } from "../public/lib/cast.js";
+import {
+  isStudio,
+  reconstructionDirection,
+  assetLedger,
+  prepareProduction,
+  productionContext,
+  composeProductionScene,
+  productionIssues,
+  rememberWorld,
+} from "./production.mjs";
 import {
   uid,
   atomic,
@@ -65,20 +77,29 @@ export class Pipeline {
     delete job.toolDrafts;
   }
   async browserInstance() {
+    if (this.browserPending) {
+      await this.browserPending;
+      return this.browser;
+    }
     if (!this.browser) {
-      try {
-        this.browser = await chromium.launch({
-          headless: true,
-          ...(process.env.FRAMECRAFT_BROWSER
-            ? { executablePath: process.env.FRAMECRAFT_BROWSER }
-            : {}),
-        });
-      } catch {
-        this.browser = await chromium.launch({
-          channel: "msedge",
-          headless: true,
-        });
-      }
+      this.browserPending = (async () => {
+        try {
+          this.browser = await chromium.launch({
+            headless: true,
+            ...(process.env.FRAMECRAFT_BROWSER
+              ? { executablePath: process.env.FRAMECRAFT_BROWSER }
+              : {}),
+          });
+        } catch {
+          this.browser = await chromium.launch({
+            channel: "msedge",
+            headless: true,
+          });
+        } finally {
+          this.browserPending = null;
+        }
+      })();
+      await this.browserPending;
     }
     return this.browser;
   }
@@ -526,19 +547,26 @@ export class Pipeline {
       return;
     }
     const emit = (...a) => this.emit(job, ...a);
-    const generate = async (prompt, role = "build", images = []) => {
-      const reviewDir = path.join(this.store.root, "reviews", job.id);
-      if (role === "qa") fs.mkdirSync(reviewDir, { recursive: true });
-      const result = await this.agents.generate({
-        prompt,
-        cwd: role === "qa" ? reviewDir : dir,
-        job,
-        emit,
-        role,
-        images,
-      });
-      return result;
-    };
+    const makeGenerate =
+      (task) =>
+      async (prompt, role = "build", images = []) => {
+        const reviewDir = path.join(this.store.root, "reviews", task.id);
+        if (role === "qa") fs.mkdirSync(reviewDir, { recursive: true });
+        const result = await this.agents.generate({
+          prompt,
+          cwd: role === "qa" ? reviewDir : dir,
+          job: task,
+          emit: (...args) => {
+            this.emit(task, ...args);
+            if (task !== job && args[0] !== "usage")
+              this.emit(job, args[0], `[${task.options.shotId}] ${args[1]}`);
+          },
+          role,
+          images,
+        });
+        return result;
+      };
+    const generate = makeGenerate(job);
     const save = () => this.store.saveProject(p);
     const stage = (s, status = "done") => {
       p.pipeline[s] = status;
@@ -568,13 +596,12 @@ export class Pipeline {
       .map((r) => "- " + r.text)
       .join("\n");
     const style = storeStyle(this.store, p.style);
-    const assets = read(path.join(dir, "assets", "ATTRIBUTIONS.json"), []);
     const guide = `# Creatorize project\nStyle: ${style?.baseStyle || p.style} / ${p.look}. Style direction: ${style?.guide || style?.description || ""}. Language: ${p.language}.\n${p.format === "9:16" ? sceneGuide.replaceAll("1280x720", "720x1280") : sceneGuide}\n${kitGuide}\n${engineGuide}\n## Reusable character designs\n${JSON.stringify(
       (p.characters || [])
         .map((id) => this.store.get("characters", id))
         .filter(Boolean)
         .map((c) => ({ name: c.name, element: c.element })),
-    )}\nFormat: ${p.format}.\n## Technique references\n${referenceGuide(p)}\n## Rules\n${rules}\nKeep facts sourced. Label reconstructions. Verify readability and exact timing.\n`;
+    )}\nFormat: ${p.format}.\n## Cast and imported motion\nUse castRole main/suspect/victim/detective/witness/police/extras on every mannequin. The project cast is applied at render time consistently across shots: ${JSON.stringify(p.cast || {})}. Imported motions: ${JSON.stringify(p.motions || [])}. Use exact motionSrc paths by name.\n## Technique references\n${referenceGuide(p)}\n## Rules\n${rules}\nKeep facts sourced. Label reconstructions. Verify readability and exact timing.\n`;
     atomic(path.join(dir, "AGENT_GUIDE.md"), guide);
     atomic(path.join(dir, "CLAUDE.md"), guide);
     atomic(path.join(dir, "AGENTS.md"), guide);
@@ -1136,43 +1163,93 @@ export class Pipeline {
       p.quality = qualityLevels[tier];
       p.status = "editing";
       p.kanbanStage = "building";
+      if (job.options.direction?.trim())
+        p.direction = job.options.direction.trim();
+      p.lastExport = null;
+      p.pipeline.exported = "pending";
       save();
-      for (let i = 0; i < p.shots.length; i++) {
-        const shot = p.shots[i];
+      if (isStudio(p)) {
+        try {
+          await prepareProduction(this.store, p, job, generate, emit);
+        } catch (e) {
+          if (p.production) {
+            if (p.production.status !== "needs-assets")
+              p.production.status = "error";
+            p.production.error = e.message;
+            save();
+            atomic(path.join(dir, "production-plan.json"), p.production);
+          }
+          throw e;
+        }
+      }
+      if (
+        job.options.shotIds !== undefined &&
+        !Array.isArray(job.options.shotIds)
+      )
+        throw Error("Shot IDs must be an array");
+      const targets = job.options.shotIds?.length
+        ? p.shots.filter((s) => job.options.shotIds.includes(s.id))
+        : p.shots;
+      if (!targets.length)
+        throw Error("Choose at least one existing shot to build");
+      let commitQueue = Promise.resolve();
+      const buildShot = async (shot, task = job) => {
+        const i = targets.indexOf(shot),
+          generate = makeGenerate(task);
         if (
+          !job.options.forceRebuild &&
           shot.scene &&
           shot.status === "built" &&
-          qualityIndex(shot.quality || "Standard") >= Math.min(tier, 2)
+          qualityIndex(shot.quality || "Standard") >= Math.min(tier, 3) &&
+          (tier < 3 || shot.visionQA?.pass === true) &&
+          (!isStudio(p) ||
+            (shot.production?.version === 2 &&
+              shot.production?.fingerprint === p.production.fingerprint))
         )
-          continue;
+          return;
         const previousScene = shot.scene;
         this.update(
           job,
-          5 + (85 * i) / p.shots.length,
-          `Building shot ${i + 1} of ${p.shots.length}: ${shot.title}`,
+          5 + (85 * i) / targets.length,
+          `Building shot ${i + 1} of ${targets.length}: ${shot.title}`,
         );
         let error = "";
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             let scene = await generate(
-              `${guide}\nAvailable licensed local assets: ${JSON.stringify(assets)}.\nBuild shot ${i + 1}/${p.shots.length}. Narration: ${shot.narration}. Duration ${shot.end - shot.start}s. Whole video: ${p.title}. Quality: ${p.quality}. ${previousScene ? `Upgrade this existing scene while preserving its story and requested composition: ${JSON.stringify(previousScene)}.` : ""} ${tier >= 1 ? "Build subject-specific structural assemblies with connected ports, supports, readable scale and environmental context. Use available licensed GLB props when relevant; do not invent asset files. Avoid generic floating primitives." : ""} Build direction: ${job.options.direction || p.direction}. ${error ? "Fix these problems: " + error : ""}\nReturn only the scene JSON described above.`,
+              `${guide}\nAvailable licensed local assets: ${JSON.stringify(assetLedger(this.store, p))}.\nBuild shot ${p.shots.indexOf(shot) + 1}/${p.shots.length}. Narration: ${shot.narration}. Duration ${shot.end - shot.start}s. Whole video: ${p.title}. Quality: ${p.quality}. ${previousScene && !isStudio(p) ? `Upgrade this existing scene while preserving its story and requested composition: ${JSON.stringify(previousScene)}.` : ""} ${tier >= 1 ? "Build subject-specific structural assemblies with connected ports, supports, readable scale and environmental context. Use available licensed GLB props when relevant; do not invent asset files. Avoid generic floating primitives." : ""} ${tier >= 2 ? "Include polished camera easing, meaningful character actions and restrained transitions in this pass." : ""} Build direction: ${job.options.direction || p.direction}. ${productionContext(p, shot)} ${error ? "Fix these problems: " + error : ""}\nReturn only the scene JSON described above.`,
             );
-            if (tier >= 2)
+            scene = composeProductionScene(p, shot, scene);
+            if (tier >= 2 && !isStudio(p))
               scene = await generate(
                 `${guide}\nRefine this candidate scene for shot ${shot.title}, duration ${shot.end - shot.start}: ${JSON.stringify(validateScene(scene))}. Improve camera curves, easing, staged reveals and articulated character animation while preserving the narration meaning and timing: ${shot.narration}. Keep objects connected and respect physical scale. Return the complete scene JSON.`,
                 "edit",
               );
             shot.scene = validateScene(scene);
+            const plannedIssues = productionIssues(p, shot);
+            if (plannedIssues.length) throw Error(plannedIssues.join("; "));
             const qa = await this.verify(p, [shot]);
             if (qa.issues.length) throw Error(qa.issues.join("; "));
-            shot.builtBy = {
-              provider: job.provider,
-              model: job.model,
-              effort: job.effort,
+            const visibilityIssues = productionIssues(p, shot, qa);
+            if (visibilityIssues.length)
+              throw Error(visibilityIssues.join("; "));
+            const builtBy = {
+              provider: task.provider,
+              model: task.model,
+              effort: task.effort,
               at: new Date().toISOString(),
             };
+            if (tier >= 3) {
+              shot.status = "reviewing";
+              save();
+              await this.visionQA(p, task, generate, [shot], guide);
+            }
+            shot.builtBy = builtBy;
             shot.status = "built";
-            shot.quality = qualityLevels[Math.min(tier, 2)];
+            shot.quality = qualityLevels[Math.min(tier, 3)];
+            rememberWorld(p, shot);
+            if (p.production)
+              atomic(path.join(dir, "production-plan.json"), p.production);
             atomic(path.join(dir, "scenes", shot.id + ".json"), shot.scene);
             atomic(
               path.join(dir, "scenes", shot.id + ".js"),
@@ -1180,13 +1257,25 @@ export class Pipeline {
             );
             save();
             shot.qa = qa;
-            this.applyToolDrafts(p, job);
+            this.applyToolDrafts(p, task);
             save();
             break;
           } catch (e) {
-            delete job.toolDrafts;
+            delete task.toolDrafts;
+            if (e.code === "VISUAL_REVIEW") {
+              shot.scene = previousScene || shot.scene;
+              shot.status = "needs-review";
+              save();
+              throw e;
+            }
             shot.scene = previousScene;
-            if (job.cancelled || job.limitHit) throw e;
+            if (
+              job.cancelled ||
+              task.cancelled ||
+              task.limitHit ||
+              e.code === "MIXAMO_SETUP"
+            )
+              throw e;
             error = e.message;
             shot.status = "error";
             save();
@@ -1194,16 +1283,34 @@ export class Pipeline {
             emit("info", `Retrying shot after validation: ${error}`);
           }
         }
-        job.checkpoint = i + 1;
-        job.commit = await this.store.commit(
-          p.id,
-          `Build ${shot.id}: ${shot.title}`,
+        task.checkpoint = i + 1;
+        commitQueue = commitQueue.then(() =>
+          this.store.commit(p.id, `Build ${shot.id}: ${shot.title}`),
         );
-      }
+        task.commit = await commitQueue;
+        job.commit = task.commit;
+      };
+      await runBuildCrew(this, job, targets, buildShot, {
+        workers: job.options.workers ?? 2,
+        setFor: (shot) =>
+          p.production?.shots.find(
+            (s) => s.shotId === shot.id && s.kind === "environment",
+          )?.setId,
+      });
       atomic(path.join(dir, "storyboard.json"), { shots: p.shots });
-      stage("scenes");
+      stage(
+        "scenes",
+        p.shots.every(
+          (s) =>
+            s.status === "built" &&
+            (!isStudio(p) ||
+              s.production?.fingerprint === p.production.fingerprint),
+        )
+          ? "done"
+          : "pending",
+      );
       if (tier >= 4) {
-        for (const shot of p.shots) {
+        for (const shot of targets) {
           if (job.editedShotIds?.includes(shot.id)) continue;
           await this.upgradeScene(p, shot, job, generate, guide, {
             scope: "video",
@@ -1213,11 +1320,14 @@ export class Pipeline {
           });
         }
       }
-      if (tier >= 3) await this.visionQA(p, job, generate);
+      if (tier >= 4) await this.visionQA(p, job, generate, targets, guide);
+      if (tier >= 3 && p.shots.every((s) => s.visionQA?.pass === true))
+        p.visionQA = "passed";
+      save();
       this.emit(
         job,
         "success",
-        `Built ${p.shots.length} shots. Programmatic frame checks passed.`,
+        `Built ${targets.length} shots. ${tier >= 3 ? "Independent visual review and programmatic frame checks passed for each shot." : "Programmatic frame checks passed."}`,
       );
       return;
     }
@@ -1388,7 +1498,7 @@ export class Pipeline {
     if (job.action === "export") {
       if (!p.shots.length || p.shots.some((s) => !s.scene))
         throw Error("Build every shot before exporting");
-      await this.export(p, job);
+      await this.exportWithRecovery(p, job, generate, guide);
       stage("exported");
       p.status = "ready";
       save();
@@ -1844,13 +1954,39 @@ export class Pipeline {
       clearTimeout(timer);
     }
   }
+  checkCharacterAssets(p, shots) {
+    try {
+      for (const shot of shots)
+        for (const e of shot.scene?.elements || []) {
+          const rendered = applyCastElement(
+            e,
+            p.cast,
+            p.characterModels,
+            p.castMode,
+          );
+          if (
+            e.type === "mannequin" &&
+            rendered.type === "model" &&
+            !fs.existsSync(safePath(this.store.projectDir(p.id), rendered.src))
+          )
+            throw Error(
+              `Character file ${rendered.src} is missing. Reimport it in Cast & motion.`,
+            );
+        }
+    } catch (e) {
+      e.code = "MIXAMO_SETUP";
+      throw e;
+    }
+  }
   async verify(p, shots) {
+    this.checkCharacterAssets(p, shots);
     const browser = await this.browserInstance();
     const page = await browser.newPage({
       viewport: { width: 640, height: 360 },
     });
     const issues = [],
-      frames = [];
+      frames = [],
+      visibleModelPaths = new Set();
     page.on("pageerror", (e) => issues.push(e.message));
     try {
       await page.goto(
@@ -1888,8 +2024,17 @@ export class Pipeline {
           )
             issues.push(`${s.id}: blank frame`);
           for (const m of result.metrics) {
+            if (m.type === "model" && m.visibleSamples > 0) {
+              const element = s.scene.elements.find((e) => e.id === m.id);
+              if (element) visibleModelPaths.add(element.src);
+            }
             if (m.overflow) issues.push(`${s.id}: ${m.id} text overflows`);
-            if (m.visible && m.essential && m.offscreen)
+            if (
+              m.visible &&
+              m.essential &&
+              m.offscreen &&
+              m.requireFullFrame !== false
+            )
               issues.push(
                 `${s.id}: ${m.id} essential subject leaves the frame`,
               );
@@ -1903,13 +2048,14 @@ export class Pipeline {
         frames: frames.length,
         issues: [...new Set(issues)],
         kind: "programmatic",
+        visibleModelPaths: [...visibleModelPaths],
         checkedAt: new Date().toISOString(),
       };
     } finally {
       await page.close();
     }
   }
-  async visionQA(p, job, generate) {
+  async visionQA(p, job, generate, shots = p.shots, guide = sceneGuide) {
     const browser = await this.browserInstance(),
       page = await browser.newPage({
         viewport:
@@ -1921,7 +2067,7 @@ export class Pipeline {
     try {
       await page.goto(`${this.base}/player.html`);
       await page.waitForFunction(() => window.ready);
-      for (const s of p.shots) {
+      for (const s of shots) {
         let passed = false;
         for (let round = 0; round < 3; round++) {
           await page.evaluate((p) => window.FC.setProject(p), p);
@@ -1967,25 +2113,33 @@ export class Pipeline {
             `Visual inspection ${s.id}, round ${round + 1}: start, middle and end frames`,
           );
           const result = await generate(
-            `You are a visual-only reviewer; you cannot see source code. Narration: ${s.narration}. The first three images show start, middle and end. The next three are middle-frame crops: upper left, upper right and lower center. Inspect readability, framing, subject relevance, clipping, floating geometry, disconnected pipes, hidden props and clear storytelling. Return JSON {pass:boolean,issues:[string]}.`,
+            `You are a visual-only reviewer; you cannot see source code. Review rendered visuals only. The supplied narration is ASR and can spell names phonetically; do not request audio, script, pronunciation or transcription changes. Narration: ${s.narration}. The first three images show start, middle and end. The next three are middle-frame crops: upper left, upper right and lower center. Inspect readability, framing, subject relevance, clipping, floating geometry, disconnected pipes, hidden props and clear storytelling. A single small corner RECONSTRUCTION label is supplied by the player and is expected; do not request its removal. ${isStudio(p) ? `${reconstructionDirection(p)} Planned shot: ${JSON.stringify(p.production?.shots.find((shot) => shot.shotId === s.id))}. Fail a normal environment shot that is an empty tabletop diorama, generic blocks, flat people, an implausibly posed figure, a giant text/diagram overlay, or a composition that hides its subject. Technical cutaways may isolate a mechanism. Be specific about what is visible and actionable; do not invent factual details.` : ""} Return JSON {pass:boolean,issues:[string]}.`,
             "qa",
             files,
           );
           s.visionQA = result;
           this.store.saveProject(p);
-          if (result.pass === true && Array.isArray(result.issues)) {
+          if (
+            result.pass === true &&
+            Array.isArray(result.issues) &&
+            result.issues.length === 0
+          ) {
             passed = true;
             break;
           }
           if (round === 2) break;
           const fixed = await generate(
-            `${sceneGuide}\nFix the specific visual defects found by an independent reviewer: ${(result.issues || []).join("; ")}. Narration: ${s.narration}. Existing scene: ${JSON.stringify(s.scene)}. Return the complete corrected scene JSON. Preserve timing.`,
+            `${guide}\nFix the specific visual defects found by an independent reviewer: ${(result.issues || []).join("; ")}. Narration: ${s.narration}. Existing scene: ${JSON.stringify(s.scene)}. Available actual assets: ${JSON.stringify(assetLedger(this.store, p))}. ${productionContext(p, s)}. Return the complete corrected scene JSON. Preserve timing.`,
             "edit",
           );
-          s.scene = validateScene(fixed);
+          s.scene = validateScene(composeProductionScene(p, s, fixed));
+          const plannedIssues = productionIssues(p, s);
+          if (plannedIssues.length) throw Error(plannedIssues.join("; "));
           this.store.saveProject(p);
           const check = await this.verify(p, [s]);
           if (check.issues.length) throw Error(check.issues.join("; "));
+          const visibilityIssues = productionIssues(p, s, check);
+          if (visibilityIssues.length) throw Error(visibilityIssues.join("; "));
           this.applyToolDrafts(p, job);
           this.store.saveProject(p);
           atomic(path.join(dir, "scenes", s.id + ".json"), s.scene);
@@ -1998,18 +2152,97 @@ export class Pipeline {
             `Visual QA fixes for ${s.id}`,
           );
         }
-        if (!passed)
-          throw Error(
+        if (!passed) {
+          const error = Error(
             `Visual review ${s.id} needs attention: ${(s.visionQA.issues || []).join("; ")}`,
           );
+          error.code = "VISUAL_REVIEW";
+          throw error;
+        }
       }
-      p.visionQA = "passed";
+      if (p.shots.every((s) => s.visionQA?.pass === true))
+        p.visionQA = "passed";
       this.store.saveProject(p);
     } finally {
       await page.close();
     }
   }
+  async exportWithRecovery(p, job, generate, guide) {
+    const repaired = new Set();
+    for (;;) {
+      try {
+        return await this.export(p, job);
+      } catch (error) {
+        if (
+          job.cancelled ||
+          job.options.autoHeal === false ||
+          error.code !== "SCENE_RENDER" ||
+          !error.shotId ||
+          repaired.has(error.shotId) ||
+          repaired.size >= 3
+        )
+          throw error;
+        const shot = p.shots.find((s) => s.id === error.shotId);
+        if (!shot) throw error;
+        repaired.add(shot.id);
+        const original = structuredClone(shot.scene);
+        this.emit(
+          job,
+          "info",
+          `Repairing render failure in ${shot.id} before restarting export: ${error.message}`,
+        );
+        try {
+          const replacement = await generate(
+            `${guide}\nRepair ONLY this shot's renderer failure. Do not change narration, timing or other shots. Shot ${shot.id}, narration ${shot.narration}. Renderer error: ${error.message}. Existing scene: ${JSON.stringify(original)}. Return a complete valid scene JSON.`,
+            "edit",
+          );
+          shot.scene = validateScene(replacement);
+          const qa = await this.verify(p, [shot]);
+          if (qa.issues.length) throw Error(qa.issues.join("; "));
+          await this.visionQA(p, job, generate, [shot], guide);
+          shot.qa = qa;
+          shot.status = "built";
+          const dir = this.store.projectDir(p.id);
+          atomic(path.join(dir, "scenes", shot.id + ".json"), shot.scene);
+          atomic(
+            path.join(dir, "scenes", shot.id + ".js"),
+            `export default ${JSON.stringify(shot.scene, null, 2)};\n`,
+          );
+          this.store.saveProject(p);
+          job.commit = await this.store.commit(
+            p.id,
+            "Repair export scene " + shot.id,
+          );
+          job.renderRepairs = [
+            ...(job.renderRepairs || []),
+            {
+              shotId: shot.id,
+              error: error.message,
+              at: new Date().toISOString(),
+            },
+          ];
+          this.persist(job);
+        } catch (repairError) {
+          shot.scene = original;
+          this.store.saveProject(p);
+          throw repairError;
+        }
+      }
+    }
+  }
   async export(p, job) {
+    this.checkCharacterAssets(p, p.shots);
+    for (const shot of p.shots)
+      for (const e of shot.scene.elements)
+        if (
+          ["image", "video", "model"].includes(e.type) &&
+          !fs.existsSync(safePath(this.store.projectDir(p.id), e.src))
+        ) {
+          const error = Error(`Missing scene asset ${e.src} in ${shot.id}`);
+          error.code = "SCENE_RENDER";
+          error.shotId = shot.id;
+          throw error;
+        }
     const browser = await this.browserInstance();
     const resolution = job.options.resolution || "1080p",
       base =
@@ -2075,7 +2308,14 @@ export class Pipeline {
       process.stdin.on("error", (e) => (failure = e));
       const completion = new Promise((resolve, reject) =>
         process.on("close", (code) =>
-          code === 0 ? resolve() : reject(Error(stderr.slice(-3000))),
+          code === 0
+            ? resolve()
+            : reject(
+                Error(
+                  stderr.slice(-3000) ||
+                    `Video encoder exited unexpectedly (code ${code}). ${failure?.message || "No diagnostic output was returned."}`,
+                ),
+              ),
         ),
       );
       completion.catch(() => {});
@@ -2083,7 +2323,16 @@ export class Pipeline {
       for (let i = 0; i < total; i++) {
         if (job.cancelled) throw Error("Stopped by user");
         if (failure) throw failure;
-        const frame = await capturePNG(page, i / fps, width, height);
+        let frame;
+        try {
+          frame = await capturePNG(page, i / fps, width, height);
+        } catch (error) {
+          error.code = "SCENE_RENDER";
+          error.shotId = p.shots.find(
+            (s) => i / fps >= s.start && i / fps < s.end,
+          )?.id;
+          throw error;
+        }
         if (!process.stdin.write(frame))
           await Promise.race([
             once(process.stdin, "drain"),
@@ -2112,6 +2361,10 @@ export class Pipeline {
       );
     } catch (e) {
       process?.kill();
+      if (fs.existsSync(dest))
+        try {
+          fs.unlinkSync(dest);
+        } catch {}
       throw e;
     } finally {
       await page.close();
@@ -2251,11 +2504,21 @@ export class Pipeline {
     job.options.agent = { ...routine.agent, ...job.options.agent };
     for (let i = job.checkpoint || 0; i < nodes.length; i++) {
       if (job.cancelled) throw Error("Stopped by user");
+      const descendants = new Set([job.id]),
+        allJobs = this.store.all("jobs");
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const child of allJobs)
+          if (descendants.has(child.parentId) && !descendants.has(child.id)) {
+            descendants.add(child.id);
+            changed = true;
+          }
+      }
       const costs = [
         job,
-        ...Object.values(job.childJobs)
-          .map((id) => this.store.get("jobs", id))
-          .filter(Boolean),
+        ...allJobs.filter(
+          (child) => child.id !== job.id && descendants.has(child.id),
+        ),
       ];
       const spent = costs.reduce((sum, j) => sum + (j.estimatedCost || 0), 0);
       if (

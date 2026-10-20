@@ -52,6 +52,7 @@ import { ScriptSettings, type ScriptSettingsHandle } from "./ScriptSettings";
 import { qualityLevels, qualityDescriptions } from "../public/lib/quality.js";
 import { StyleParameters } from "./StyleParameters";
 import { CharacterBuilder } from "./CharacterBuilder";
+import { CastEditor } from "./CastEditor";
 import { RetakeEditor } from "./RetakeEditor";
 import { resolveAgentRoute, capabilityFor } from "../server/agent-routing.mjs";
 const stageInfo = [
@@ -96,7 +97,21 @@ export default function Editor({
     [script, setScript] = useState(p.script),
     [research, setResearch] = useState(p.research),
     [direction, setDirection] = useState(""),
-    [quality, setQuality] = useState(0),
+    [quality, setQuality] = useState(
+      Math.max(
+        0,
+        qualityLevels.indexOf(
+          p.quality ||
+            ((p.baseStyle || p.style) === "3d" ? "Verified" : "Standard"),
+        ),
+      ),
+    ),
+    [assetPolicy, setAssetPolicy] = useState(
+      p.production?.policy || "automatic",
+    ),
+    [buildScope, setBuildScope] = useState("video"),
+    [forceRebuild, setForceRebuild] = useState(false),
+    [workers, setWorkers] = useState(2),
     [voiceProvider, setVoiceProvider] = useState("windows"),
     [voice, setVoice] = useState(""),
     [voices, setVoices] = useState<string[]>([]),
@@ -105,6 +120,7 @@ export default function Editor({
     [zoom, setZoom] = useState(1),
     [resolution, setResolution] = useState("1080p"),
     [fps, setFps] = useState(30),
+    [autoHeal, setAutoHeal] = useState(true),
     [busy, setBusy] = useState(false),
     [wave, setWave] = useState<number[]>([]),
     [notes, setNotes] = useState(false),
@@ -124,9 +140,26 @@ export default function Editor({
   const shot =
     p.shots.find((s) => position >= s.start && position < s.end) ||
     p.shots.at(-1);
-  const jobs = state.jobs.filter((j) => j.projectId === p.id),
+  const projectJobs = state.jobs.filter((j) => j.projectId === p.id);
+  const jobs = projectJobs.filter(
+      (j: any) => !j.parentId || j.action !== "build-shot",
+    ),
     running = jobs.find((j) => ["running", "queued"].includes(j.status)),
     current = jobs[0];
+  const runJobs = current
+      ? [current, ...projectJobs.filter((j) => j.parentId === current.id)]
+      : [],
+    runUsage = runJobs.reduce(
+      (sum, j) => ({
+        input_tokens: sum.input_tokens + (j.usage?.input_tokens || 0),
+        output_tokens: sum.output_tokens + (j.usage?.output_tokens || 0),
+      }),
+      { input_tokens: 0, output_tokens: 0 },
+    );
+  const runCost = runJobs.reduce((sum, j) => sum + (j.estimatedCost || 0), 0),
+    runPriced =
+      runJobs.some((j) => j.estimatedCost !== undefined) &&
+      !runJobs.some((j) => j.runs?.some((r) => r.estimatedCost === undefined));
   const provider =
     providerNames[
       running?.provider || p.agent?.provider || state.settings.provider
@@ -404,6 +437,25 @@ export default function Editor({
           >
             <Sparkles size={16} />
           </button>
+          {["3d", "lowpoly"].includes(p.baseStyle || p.style) && (
+            <Button small disabled={!!running} onClick={() => setModal("cast")}>
+              Cast & motion
+            </Button>
+          )}
+          {(p.baseStyle || p.style) === "3d" && p.engineVersion !== 3 && (
+            <Button
+              small
+              disabled={!!running}
+              onClick={() =>
+                act(
+                  () => api(`/projects/${p.id}/update-engine`, "POST", {}),
+                  "Character engine updated; review the preview before export",
+                )
+              }
+            >
+              Update engine
+            </Button>
+          )}
           <Button primary small onClick={() => setModal("export")}>
             <Download size={15} />
             Export
@@ -967,22 +1019,21 @@ export default function Editor({
                       <div className="usage-summary">
                         <strong>{current.provider || provider}</strong>
                         <span>
-                          {(current.usage.input_tokens || 0).toLocaleString()}{" "}
-                          input ·{" "}
-                          {(current.usage.output_tokens || 0).toLocaleString()}{" "}
-                          output tokens
+                          {runUsage.input_tokens.toLocaleString()} input ·{" "}
+                          {runUsage.output_tokens.toLocaleString()} output
+                          tokens
                         </span>
                         <span>
                           {current.startedAt
                             ? `${Math.round((new Date(current.finishedAt || Date.now()).getTime() - new Date(current.startedAt).getTime()) / 1000)}s elapsed`
                             : "Queued"}
-                          {current.estimatedCost !== undefined
-                            ? ` · $${current.estimatedCost.toFixed(4)} estimated API equivalent`
+                          {runPriced
+                            ? ` · $${runCost.toFixed(4)} estimated API equivalent`
                             : " · Price not configured"}
                         </span>
                         <small>
                           Project total:{" "}
-                          {jobs
+                          {projectJobs
                             .reduce(
                               (n, j) =>
                                 n +
@@ -993,6 +1044,21 @@ export default function Editor({
                             .toLocaleString()}{" "}
                           tokens. Subscription usage is not an extra API charge.
                         </small>
+                      </div>
+                    )}
+                    {current.crew && (
+                      <div className="build-crew">
+                        <strong>
+                          Director · {current.crew.workers} scene workers
+                        </strong>
+                        {current.crew.shots.map((s: any) => (
+                          <div key={s.id}>
+                            <span>
+                              {s.id} · {s.title}
+                            </span>
+                            <Badge>{s.status}</Badge>
+                          </div>
+                        ))}
                       </div>
                     )}
                     {current.events.map((e, i) => (
@@ -1626,6 +1692,15 @@ export default function Editor({
           </footer>
         </Modal>
       )}
+      {modal === "cast" && (
+        <CastEditor
+          project={p}
+          shotId={shot?.scene ? shot.id : undefined}
+          close={() => setModal("")}
+          refresh={refresh}
+          notify={notify}
+        />
+      )}
       {modal === "build" && (
         <Modal title="Build your video" onClose={() => setModal("")}>
           <div className="modal-body">
@@ -1677,6 +1752,78 @@ export default function Editor({
               ))}
             </div>
             <p className="form-hint">{qualityDescriptions[quality]}</p>
+            <label>
+              Build scope
+              <select
+                aria-label="Build scope"
+                value={buildScope}
+                onChange={(e) => setBuildScope(e.target.value)}
+              >
+                <option value="video">
+                  Whole video · {p.shots.length || "all"} shots
+                </option>
+                {shot && <option value="shot">Current shot · {shot.id}</option>}
+              </select>
+            </label>
+            <label>
+              Concurrent scene builders
+              <select
+                aria-label="Concurrent scene builders"
+                value={workers}
+                onChange={(e) => setWorkers(Number(e.target.value))}
+              >
+                <option value="1">1 · Sequential</option>
+                <option value="2">2 · Parallel</option>
+                <option value="3">3 · Parallel</option>
+              </select>
+            </label>
+            <p className="form-hint">
+              The director plans shared sets first. Builders work in focused
+              shot sessions; dependent shots reuse an accepted set. More workers
+              use more simultaneous provider capacity.
+            </p>
+            {(p.baseStyle || p.style) === "3d" && (
+              <>
+                <label>
+                  3D assets
+                  <select
+                    aria-label="3D assets"
+                    value={assetPolicy}
+                    onChange={(e) => setAssetPolicy(e.target.value)}
+                  >
+                    <option value="automatic">
+                      Find and download relevant CC0 models
+                    </option>
+                    <option value="procedural">
+                      Use procedural geometry only
+                    </option>
+                  </select>
+                </label>
+                <p className="form-hint">
+                  Plans shared environments before building. Saves source
+                  credits and actual model usage in Assets.
+                  {quality >= 3
+                    ? " Each shot passes independent visual review before it is accepted."
+                    : " Choose Verified for independent visual review of each shot."}
+                </p>
+                {p.shots.some(
+                  (s: any) => s.scene && s.production?.version !== 2,
+                ) && (
+                  <p className="notice">
+                    Shots from earlier Studio builds will be upgraded to the new
+                    environment and asset plan.
+                  </p>
+                )}
+              </>
+            )}
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={forceRebuild}
+                onChange={(e) => setForceRebuild(e.target.checked)}
+              />
+              Rebuild completed shots in this scope
+            </label>
             <div className="notice">
               {p.pipeline.wordsTimed === "done"
                 ? `${p.words.length} timed words are ready. Completed shots can be previewed while the rest build.`
@@ -1692,6 +1839,12 @@ export default function Editor({
                 job("build", {
                   quality: qualityLevels[quality],
                   direction,
+                  assetPolicy,
+                  forceRebuild,
+                  workers,
+                  ...(buildScope === "shot" && shot
+                    ? { shotIds: [shot.id] }
+                    : {}),
                 })
               }
             >
@@ -1746,6 +1899,19 @@ export default function Editor({
               separate SRT caption file is included. Export time depends on
               resolution and hardware.
             </p>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={autoHeal}
+                onChange={(e) => setAutoHeal(e.target.checked)}
+              />
+              Repair broken scenes and restart export
+            </label>
+            <p className="form-hint">
+              Uses your selected agent only for scene failures, with independent
+              review before restarting. Encoder and system errors are reported
+              directly. At most one repair per shot and three per export.
+            </p>
             {p.lastExport && (
               <a className="button" href={media(p, p.lastExport)} download>
                 <Download size={15} />
@@ -1763,7 +1929,7 @@ export default function Editor({
                 !p.shots.length ||
                 p.shots.some((s) => !s.scene)
               }
-              onClick={() => job("export", { resolution, fps })}
+              onClick={() => job("export", { resolution, fps, autoHeal })}
             >
               <Download size={15} />
               Export MP4

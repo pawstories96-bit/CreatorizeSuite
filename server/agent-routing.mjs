@@ -52,6 +52,7 @@ export function normalizeAgent(value) {
   };
 }
 export function resolveAgentRoute(settings, role, ...overrides) {
+  if (role === "plan") role = "build";
   let route = {
     provider: settings.provider || "codex",
     model:
@@ -82,6 +83,7 @@ export function resolveAgentRoute(settings, role, ...overrides) {
 }
 
 export function resolveAgentRoutes(settings, role, ...overrides) {
+  if (role === "plan") role = "build";
   const primary = resolveAgentRoute(settings, role, ...overrides);
   const fallbacks = settings.enableFallbacks
     ? settings.fallbacks?.[role] ||

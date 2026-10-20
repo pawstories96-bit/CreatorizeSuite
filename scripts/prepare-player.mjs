@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import "./license-notices.mjs";
+import "./prepare-model-tools.mjs";
 // electron-builder excludes dependency directories named "examples". These
 // three runtime modules are required by our GLB renderer, so bundle explicitly.
 const copied = new Set();
@@ -18,6 +19,8 @@ function copyModule(file) {
 }
 for (const file of [
   "loaders/GLTFLoader.js",
+  "loaders/FBXLoader.js",
+  "exporters/GLTFExporter.js",
   "utils/SkeletonUtils.js",
   "utils/BufferGeometryUtils.js",
   "objects/Reflector.js",

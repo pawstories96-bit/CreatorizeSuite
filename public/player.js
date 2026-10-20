@@ -1,6 +1,10 @@
 import * as THREE from "/vendor/three.module.js";
 import { GLTFLoader } from "/three-addons/loaders/GLTFLoader.js";
 import { clone } from "/three-addons/utils/SkeletonUtils.js";
+import { applyCastElement } from "/lib/cast.js";
+import { resolveCamera } from "/lib/cameras.js";
+import { motionAnimator } from "/lib/motion.js";
+import { driveHumanoid } from "/lib/humanoid.js";
 import {
   geometryTypes,
   createGeometryObject,
@@ -8,6 +12,7 @@ import {
   drawCharacter2d,
 } from "/engine.js";
 const models = new Map(),
+  motions = new Map(),
   videos = new Map();
 const canvas = document.querySelector("#stage"),
   c = canvas.getContext("2d"),
@@ -35,6 +40,16 @@ function ease(x) {
   return 1 - (1 - x) ** 3;
 }
 function transform(e, t) {
+  e = {
+    x: 0,
+    y: 0,
+    z: 0,
+    rotation: 0,
+    opacity: 1,
+    delay: 0,
+    duration: 1,
+    ...e,
+  };
   const cue = project?.timeline?.cues?.find(
     (cue) => cue.shotId === shot?.id && cue.elementId === e.id,
   );
@@ -258,6 +273,62 @@ function draw(e, t) {
   }
   c.restore();
 }
+function modelMaterial(material, e) {
+  const m = material.clone(),
+    options = e.material;
+  m.userData.alpha = m.opacity;
+  if (options?.tint && m.color) {
+    if (options.recolor) {
+      m.color.set(options.tint);
+      m.map = null;
+      m.vertexColors = false;
+    } else m.color.multiply(new THREE.Color(options.tint));
+  }
+  if (options && "roughness" in m) m.roughness = options.roughness;
+  if (options && "metalness" in m) m.metalness = options.metalness;
+  if (options?.emissive && m.emissive) m.emissive.set(options.emissive);
+  if (options?.emissiveIntensity != null && m.emissive)
+    m.emissiveIntensity = options.emissiveIntensity;
+  return m;
+}
+function instanceModel(asset, e) {
+  const root = new THREE.Group(),
+    dummy = new THREE.Object3D();
+  asset.scene.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(asset.scene),
+    center = bounds.getCenter(new THREE.Vector3());
+  const matrices = e.instances.map((v) => {
+    dummy.position.set(v.x, v.y, v.z);
+    dummy.rotation.set(0, (v.rotation * Math.PI) / 180, 0);
+    dummy.scale.setScalar(v.scale);
+    dummy.updateMatrix();
+    return dummy.matrix.clone();
+  });
+  root.userData.instanceCenters = matrices.map((m) =>
+    center.clone().applyMatrix4(m),
+  );
+  asset.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.isSkinnedMesh)
+      throw Error(
+        "Use individual elements for animated character rigs; model instances are for static scenery",
+      );
+    const material = Array.isArray(o.material)
+      ? o.material.map((m) => modelMaterial(m, e))
+      : modelMaterial(o.material, e);
+    const mesh = new THREE.InstancedMesh(
+      o.geometry.clone(),
+      material,
+      e.instances.length,
+    );
+    matrices.forEach((m, i) =>
+      mesh.setMatrixAt(i, m.clone().multiply(o.matrixWorld)),
+    );
+    mesh.castShadow = mesh.receiveShadow = true;
+    root.add(mesh);
+  });
+  return root;
+}
 function build3d(s) {
   postProcessing?.dispose();
   postProcessing = null;
@@ -274,23 +345,67 @@ function build3d(s) {
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(1);
+    renderer.info.autoReset = false;
     renderer.shadowMap.enabled = true;
   }
+  if (world) world.background?.dispose?.();
   if (world)
     world.traverse((o) => {
+      o.userData.disposeControl?.();
       if (o.isReflector) o.dispose();
+      if (o.isInstancedMesh) o.dispose();
       o.shadow?.dispose?.();
       o.geometry?.dispose();
-      if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
-      else o.material?.dispose();
+      for (const material of Array.isArray(o.material)
+        ? o.material
+        : o.material
+          ? [o.material]
+          : []) {
+        material.userData.ownedTextures?.forEach((texture) =>
+          texture.dispose(),
+        );
+        material.dispose();
+      }
     });
   world = new THREE.Scene();
+  world.background = new THREE.Color(s.scene.background || "#d6e1e5");
+  if (s.scene.environment?.kind === "exterior") {
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(6000, 32, 16),
+      new THREE.ShaderMaterial({
+        uniforms: {
+          topColor: { value: new THREE.Color(s.scene.environment.skyTop) },
+          horizonColor: {
+            value: new THREE.Color(s.scene.environment.skyHorizon),
+          },
+        },
+        vertexShader: `varying vec3 skyDirection; void main(){ skyDirection=position; vec4 p=projectionMatrix*mat4(mat3(viewMatrix))*vec4(position,1.0);gl_Position=p.xyww; }`,
+        fragmentShader: `uniform vec3 topColor; uniform vec3 horizonColor; varying vec3 skyDirection; void main(){float elevation=normalize(skyDirection).y;gl_FragColor=vec4(mix(horizonColor,topColor,smoothstep(-.04,.8,elevation)),1.0);
+#include <colorspace_fragment>
+}`,
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    sky.frustumCulled = false;
+    sky.renderOrder = -10000;
+    // The sky belongs in beauty/reflection views, not the SSAO normal buffer.
+    sky.onBeforeRender = (_renderer, scene) =>
+      sky.geometry.setDrawRange(0, scene.overrideMaterial ? 0 : Infinity);
+    sky.onAfterRender = () => sky.geometry.setDrawRange(0, Infinity);
+    world.add(sky);
+  }
+
   const cp = s.scene.camera || { x: 12, y: 10, z: 18 };
   camera = new THREE.PerspectiveCamera(
-    40,
+    s.scene.cameraFov || 40,
     width / height,
     0.1,
-    Math.max(500, Math.hypot(cp.x, cp.y, cp.z) * 8),
+    Math.max(
+      s.scene.environment ? 2000 : 500,
+      Math.hypot(cp.x, cp.y, cp.z) * 8,
+    ),
   );
   camera.position.set(cp.x, cp.y, cp.z);
   camera.lookAt(0, 1, 0);
@@ -313,26 +428,79 @@ function build3d(s) {
   });
   light.shadow.normalBias = 0.03;
   world.add(light);
+  if (s.scene.environment) {
+    const target = s.scene.cameraRig?.target || { x: 0, y: 1, z: 0 };
+    const span = Math.max(
+      15,
+      Math.min(
+        220,
+        Math.hypot(cp.x - target.x, cp.y - target.y, cp.z - target.z) * 0.9,
+      ),
+    );
+    light.target.position.set(target.x, target.y, target.z);
+    world.add(light.target);
+    light.position.copy(
+      new THREE.Vector3(lp.x, lp.y, lp.z)
+        .normalize()
+        .multiplyScalar(span * 2)
+        .add(light.target.position),
+    );
+    light.shadow.mapSize.set(2048, 2048);
+    light.shadow.normalBias = Math.max(0.03, span / 1024);
+    light.shadow.bias = -0.00005;
+    Object.assign(light.shadow.camera, {
+      left: -span,
+      right: span,
+      top: span,
+      bottom: -span,
+      far: span * 6,
+    });
+  }
   meshes = [];
   for (const e of s.scene.elements) {
     if (e.type === "model") {
       const asset = models.get(e.src);
       if (!asset) continue;
-      const m = clone(asset.scene);
+      const m = e.instances ? instanceModel(asset, e) : clone(asset.scene);
       m.traverse((o) => {
         o.userData.id = e.id;
         if (o.isMesh) {
           o.castShadow = true;
           o.receiveShadow = true;
         }
-        if (o.material)
+        if (o.material && !e.instances)
           o.material = Array.isArray(o.material)
-            ? o.material.map((m) => m.clone())
-            : o.material.clone();
-        if (o.geometry) o.geometry = o.geometry.clone();
+            ? o.material.map((m) => modelMaterial(m, e))
+            : modelMaterial(o.material, e);
+        if (o.geometry && !e.instances) o.geometry = o.geometry.clone();
       });
-      const mixer = new THREE.AnimationMixer(m);
-      asset.animations.forEach((clip) => mixer.clipAction(clip).play());
+      const mixer =
+        e.instances || e.useHumanoidRig ? null : new THREE.AnimationMixer(m);
+      if (mixer)
+        (e.clip
+          ? asset.animations.filter((clip) => clip.name === e.clip)
+          : asset.animations.slice(0, 1)
+        ).forEach((clip) => mixer.clipAction(clip).play());
+      if (e.fitHeight) {
+        const bounds = new THREE.Box3().setFromObject(m),
+          height = bounds.max.y - bounds.min.y;
+        if (height > 0) {
+          const container = new THREE.Group();
+          m.scale.setScalar(e.fitHeight / height);
+          m.position.y = (-bounds.min.y * e.fitHeight) / height;
+          container.add(m);
+          world.add(container);
+          if (e.useHumanoidRig)
+            driveHumanoid(
+              m,
+              container,
+              e,
+              e.motionSrc ? motions.get(e.motionSrc) : null,
+            );
+          meshes.push({ m: container, e, mixer });
+          continue;
+        }
+      }
       world.add(m);
       meshes.push({ m, e, mixer });
       continue;
@@ -340,8 +508,12 @@ function build3d(s) {
     const m = createGeometryObject(e, {
       ...project,
       ps1: s.scene.effects?.ps1,
+      sceneEnvironment: s.scene.environment,
+      sceneFog: s.scene.effects?.fog,
     });
     if (!m) continue;
+    if (e.type === "mannequin" && e.motionSrc && motions.has(e.motionSrc))
+      m.userData.motion = motionAnimator(motions.get(e.motionSrc), e.loop);
     m.position.set(e.x, e.y, e.z);
     m.castShadow = true;
     m.receiveShadow = true;
@@ -367,7 +539,8 @@ function measure3d() {
   world.updateMatrixWorld(true);
   camera.updateMatrixWorld(true);
   const boxes = [],
-    ray = new THREE.Raycaster();
+    ray = new THREE.Raycaster(),
+    occluders = meshes.filter((v) => v.m.visible).map((v) => v.m);
   for (const { m, e } of meshes) {
     if (
       !m.visible ||
@@ -397,29 +570,48 @@ function measure3d() {
       points.every((p) => p.z < -1 || p.z > 1);
     const center = box.getCenter(new THREE.Vector3()),
       size = box.getSize(new THREE.Vector3());
-    const samples = [center];
+    let samples = [center];
     for (const axis of ["x", "y", "z"])
       for (const side of [-1, 1]) {
         const point = center.clone();
         point[axis] += size[axis] * 0.4 * side;
         samples.push(point);
       }
-    let seen = 0;
-    for (const point of samples) {
+    if (m.userData.instanceCenters) {
+      const visible = m.userData.instanceCenters
+        .map((p) => p.clone().applyMatrix4(m.matrixWorld))
+        .filter((p) => {
+          const v = p.clone().project(camera);
+          return (
+            Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 && v.z >= -1 && v.z <= 1
+          );
+        })
+        .sort(
+          (a, b) =>
+            a.distanceToSquared(camera.position) -
+            b.distanceToSquared(camera.position),
+        );
+      if (visible.length) samples = visible.slice(0, 12);
+    }
+    // Exact screen bounds and ground/collision checks apply to every object.
+    // Ray-test the subjects, not every bolt against every other bolt.
+    const sampleVisibility =
+      e.essential ||
+      ["model", "mannequin"].includes(e.type) ||
+      e.id === selected;
+    let seen = sampleVisibility ? 0 : null;
+    for (const point of sampleVisibility ? samples : []) {
       const projected = point.clone().project(camera);
       ray.setFromCamera(new THREE.Vector2(projected.x, projected.y), camera);
       const hit = ray
-        .intersectObjects(
-          meshes.filter((v) => v.m.visible).map((v) => v.m),
-          true,
-        )
+        .intersectObjects(occluders, true)
         .find(
           (h) => h.object.visible && (h.object.material?.opacity ?? 1) > 0.01,
         );
       if (hit?.object.userData.id === e.id) seen++;
     }
     const problems = [];
-    if (e.essential && offscreen)
+    if (e.essential && offscreen && e.framing !== "detail")
       problems.push("essential subject leaves the frame");
     if (e.essential && seen === 0)
       problems.push("essential subject is fully occluded in raycast samples");
@@ -432,10 +624,11 @@ function measure3d() {
       type: e.type,
       visible: true,
       essential: e.essential,
+      requireFullFrame: e.framing !== "detail",
       bounds,
       offscreen,
       visibleSamples: seen,
-      raycastSamples: samples.length,
+      raycastSamples: sampleVisibility ? samples.length : 0,
       worldBounds: { min: box.min.toArray(), max: box.max.toArray() },
       problems,
     };
@@ -459,6 +652,7 @@ function measure3d() {
     }
 }
 function render(t) {
+  renderer?.info.reset();
   currentTime = t;
   if (!project) return;
   const s =
@@ -500,7 +694,12 @@ function render(t) {
         ((a.rotation + (e.rotation3d?.y || 0)) * Math.PI) / 180,
         ((e.rotation3d?.z || 0) * Math.PI) / 180,
       );
-      m.scale.setScalar(a.scale * (e.scale || 1));
+      const scale = a.scale * (e.scale || 1);
+      m.scale.set(
+        scale * (e.scale3d?.x ?? 1),
+        scale * (e.scale3d?.y ?? 1),
+        scale * (e.scale3d?.z ?? 1),
+      );
       mixer?.setTime(local);
       m.userData.animate?.(local);
       m.traverse((o) => {
@@ -524,7 +723,31 @@ function render(t) {
           rig.target.y,
           rig.target.z,
         );
-        if (rig.type === "orbit")
+        const progress = Math.min(1, local / rig.duration),
+          travel =
+            rig.easing === "smooth"
+              ? progress * progress * (3 - 2 * progress)
+              : progress;
+        if (rig.targetTo)
+          target.lerp(
+            new THREE.Vector3(rig.targetTo.x, rig.targetTo.y, rig.targetTo.z),
+            travel,
+          );
+        if (rig.type === "orbit" && rig.preset) {
+          const angle =
+            (((rig.azimuth ?? 35) +
+              (rig.preset === "orbit-left" ? -1 : 1) *
+                (rig.amount ?? 0.22) *
+                90 *
+                travel) *
+              Math.PI) /
+            180;
+          camera.position.set(
+            target.x + Math.sin(angle) * (rig.distance || 12),
+            target.y + rig.height,
+            target.z + Math.cos(angle) * (rig.distance || 12),
+          );
+        } else if (rig.type === "orbit")
           camera.position.set(
             target.x + Math.sin(local * rig.speed) * rig.radius,
             target.y + rig.height,
@@ -536,7 +759,7 @@ function render(t) {
           camera.position.lerpVectors(
             new THREE.Vector3(from.x, from.y, from.z),
             new THREE.Vector3(to.x, to.y, to.z),
-            Math.min(1, local / rig.duration),
+            travel,
           );
         }
         camera.lookAt(target);
@@ -550,11 +773,18 @@ function render(t) {
       if (!geometryTypes.includes(e.type)) draw(e, local);
     if (s.scene.label || project.style === "3d") {
       c.fillStyle = "rgba(0,0,0,.6)";
-      c.fillRect(logicalWidth - 270, 24, 246, 34);
+      const label = s.scene.label || "RECONSTRUCTION";
+      c.font = "12px monospace";
+      const labelWidth = Math.min(246, c.measureText(label).width + 20);
+      c.fillRect(logicalWidth - labelWidth - 24, 24, labelWidth, 24);
       c.fillStyle = "#fff";
-      c.font = "13px monospace";
       c.textAlign = "center";
-      c.fillText(s.scene.label || "RECONSTRUCTION", logicalWidth - 147, 46);
+      c.fillText(
+        label,
+        logicalWidth - labelWidth / 2 - 24,
+        40,
+        labelWidth - 12,
+      );
     }
   } else if (!cameraVideo) {
     c.fillStyle = "#74847e";
@@ -641,7 +871,54 @@ function render(t) {
   }
   return { shotId: s?.id, metrics };
 }
-async function setProject(p) {
+let projectQueue = Promise.resolve(),
+  projectUpdate = 0,
+  modelProjectId;
+function setProject(p) {
+  const update = ++projectUpdate;
+  const task = projectQueue
+    .catch(() => {})
+    .then(async () => {
+      if (update !== projectUpdate) return;
+      try {
+        await loadProject(p);
+      } catch (error) {
+        if (update === projectUpdate) throw error;
+      }
+    });
+  projectQueue = task;
+  return task;
+}
+async function loadProject(p) {
+  document.querySelector("#error").style.display = "none";
+  for (const src of new Set(
+    p.shots.flatMap((s) =>
+      (s.scene?.elements || []).map((e) => e.motionSrc).filter(Boolean),
+    ),
+  )) {
+    if (!motions.has(src)) {
+      const r = await fetch(`/media/${p.id}/${src}`);
+      if (!r.ok) throw Error("Could not load imported motion: " + src);
+      motions.set(src, await r.json());
+    }
+  }
+  p = {
+    ...p,
+    shots: p.shots.map((s) => ({
+      ...s,
+      scene: s.scene
+        ? resolveCamera(
+            {
+              ...s.scene,
+              elements: s.scene.elements.map((e) =>
+                applyCastElement(e, p.cast, p.characterModels, p.castMode),
+              ),
+            },
+            s.end - s.start,
+          )
+        : null,
+    })),
+  };
   if (p.baseStyle && p.baseStyle !== p.style) {
     const module = await import(
       `/api/styles/${encodeURIComponent(p.style)}/module?v=${encodeURIComponent(p.updatedAt || "")}`
@@ -691,6 +968,8 @@ async function setProject(p) {
   canvas.style.imageRendering = p.style === "pixel" ? "pixelated" : "auto";
   if (renderer) renderer.setSize(width, height);
   images.clear();
+  const previousModels = new Map(models),
+    sameProject = modelProjectId === p.id;
   models.clear();
   videos.forEach((v) => {
     v.pause();
@@ -716,9 +995,16 @@ async function setProject(p) {
       ...new Set(
         mediaElements.filter((e) => e.type === "model").map((e) => e.src),
       ),
-    ].map(async (src) =>
-      models.set(src, await loader.loadAsync(`/media/${p.id}/${src}`)),
-    ),
+    ].map(async (src) => {
+      const reusable =
+        sameProject &&
+        /^assets\/[a-f0-9]{24}\.glb$/.test(src) &&
+        previousModels.get(src);
+      models.set(
+        src,
+        reusable || (await loader.loadAsync(`/media/${p.id}/${src}`)),
+      );
+    }),
   );
   await Promise.all(
     [
@@ -764,7 +1050,26 @@ async function setProject(p) {
         }),
     ),
   );
+  // Playback may have drawn this shot while the model files were loading.
+  // Rebuild its mesh list now that every asset is available.
+  shot = null;
   render(currentTime);
+  modelProjectId = p.id;
+  for (const [src, asset] of previousModels)
+    if (models.get(src) !== asset) {
+      asset.scene.traverse((o) => {
+        o.geometry?.dispose();
+        for (const material of Array.isArray(o.material)
+          ? o.material
+          : o.material
+            ? [o.material]
+            : []) {
+          for (const value of Object.values(material))
+            if (value?.isTexture) value.dispose();
+          material.dispose();
+        }
+      });
+    }
 }
 function videoTime(e, t, v) {
   if (e.camera) {
@@ -786,7 +1091,7 @@ async function renderFrame(t) {
   const targets = (shot?.scene?.elements || []).filter(
     (e) => e.type === "video",
   );
-  if (project.sourceVideo)
+  if (project?.sourceVideo)
     targets.push({ src: project.sourceVideo, camera: true });
   if (!targets.length) return initial;
   await Promise.all(
@@ -819,6 +1124,16 @@ window.FC = {
   renderFrame,
   getProject: () => project,
   getMetrics: () => metrics,
+  getRenderStats: () =>
+    renderer
+      ? {
+          ...renderer.info.render,
+          memory: { ...renderer.info.memory },
+          modelSources: meshes
+            .filter(({ e }) => e.type === "model")
+            .map(({ e }) => e.src),
+        }
+      : null,
   setSelection: (id) => {
     selected = id;
     render(currentTime);
@@ -915,6 +1230,13 @@ if (params.get("character")) {
   const begin = performance.now();
   const animate = (now) => {
     render(((now - begin) / 1000) % 8);
+    requestAnimationFrame(animate);
+  };
+  requestAnimationFrame(animate);
+}
+if (params.has("castPreview")) {
+  const animate = (now) => {
+    renderFrame((now / 1000) % 6);
     requestAnimationFrame(animate);
   };
   requestAnimationFrame(animate);

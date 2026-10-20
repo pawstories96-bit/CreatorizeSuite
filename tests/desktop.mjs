@@ -26,6 +26,54 @@ const app = await electron.launch({
 });
 try {
   const page = await app.firstWindow();
+  if (process.env.NATIVE_TEST_BACKGROUND === "1")
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().forEach((w) => {
+        w.webContents.setBackgroundThrottling(false);
+        w.hide();
+      }),
+    );
+  const captureWindow = async (dest) => {
+    let encoded;
+    for (let attempt = 0; attempt < 3; attempt++)
+      try {
+        encoded = await app.evaluate(async ({ BrowserWindow }) => {
+          const w = BrowserWindow.getAllWindows()[0],
+            wasVisible = w.isVisible();
+          const bounded = () =>
+            Promise.race([
+              w.webContents.capturePage(undefined, {
+                stayHidden: true,
+                stayAwake: true,
+              }),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(Error("Native capture timed out")),
+                  5000,
+                ),
+              ),
+            ]);
+          try {
+            return (await bounded()).toPNG().toString("base64");
+          } catch {
+            // Windows can stop producing compositor surfaces for a hidden test
+            // window. Show only this test window without taking keyboard focus.
+            w.showInactive();
+            try {
+              return (await bounded()).toPNG().toString("base64");
+            } finally {
+              if (!wasVisible) w.hide();
+            }
+          }
+        });
+        break;
+      } catch (error) {
+        if (attempt === 2 || !error.message.includes("UnknownVizError"))
+          throw error;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    fs.writeFileSync(dest, Buffer.from(encoded, "base64"));
+  };
   await page
     .getByRole("heading", { name: "Make something worth watching." })
     .waitFor();
@@ -35,7 +83,7 @@ try {
       .then((s) => s.projects.length),
   );
   assert.equal(count, 0);
-  await page.screenshot({ path: "test-results/desktop.png" });
+  await captureWindow("test-results/desktop.png");
   const security = await app.evaluate(({ BrowserWindow }) => {
     const prefs =
       BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
@@ -62,7 +110,7 @@ try {
     .getByText("Checking…", { exact: true })
     .first()
     .waitFor({ state: "hidden", timeout: 40000 });
-  await page.screenshot({ path: "test-results/connections.png" });
+  await captureWindow("test-results/connections.png");
   console.log("PASS: desktop provider detection");
   if (process.env.PACKAGED_EXE) {
     const base = new URL(page.url()).origin;
@@ -194,7 +242,7 @@ try {
       const pixel = canvas.getContext("2d").getImageData(640, 360, 1, 1).data;
       return pixel[0] === 168 && pixel[1] === 212 && pixel[2] === 177;
     });
-    await page.screenshot({ path: "test-results/packaged-project-model.png" });
+    await captureWindow("test-results/packaged-project-model.png");
     console.log(
       "PASS: packaged model discovery and editor model selection persist the actual provider model ID",
     );
@@ -212,6 +260,12 @@ try {
     graphics.look = "Studio";
     graphics.shots[0].scene = validateScene({
       background: "#d6e0df",
+      environment: {
+        kind: "exterior",
+        skyTop: "#749cc1",
+        skyHorizon: "#d6e0df",
+      },
+      cameraFov: 42,
       camera: { x: 10, y: 7, z: 12 },
       effects: { ssao: true, bloom: 0.12, grain: 0.03, outline: true },
       elements: [
@@ -244,6 +298,16 @@ try {
           tubeRadius: 0.15,
           fill: "#aa734e",
         },
+        {
+          id: "seated",
+          type: "mannequin",
+          x: 2,
+          y: 0,
+          z: 0,
+          height: 1.8,
+          fill: "#f0efed",
+          pose: "sit",
+        },
       ],
     });
     await page.evaluate((base) => {
@@ -271,10 +335,219 @@ try {
       window.FC.renderFrame(0.5),
     );
     assert.ok(graphicsFrame.metrics.some((m) => m.id === "rig" && m.bounds));
-    await page
-      .locator("#packaged-graphics-check")
-      .screenshot({ path: "test-results/packaged-graphics.png" });
+    const seated = graphicsFrame.metrics.find((m) => m.id === "seated");
+    assert.ok(
+      Math.abs(seated.worldBounds.min[1]) < 0.05,
+      "A seated figure's feet must remain at the specified floor height",
+    );
+    await captureWindow("test-results/packaged-graphics.png");
     assert.deepEqual(graphicsErrors, []);
+    if (process.env.LIVE_PACKAGED_ASSETS === "1") {
+      const catalog = await call("/model-assets?q=cargo%20ship");
+      const source = catalog.find(
+        (a) => a.id === "kenney:watercraft-kit:ship-cargo-a",
+      );
+      assert.ok(source);
+      const downloaded = await call(`/projects/${p.id}/models`, {
+        id: source.id,
+      });
+      assert.ok(downloaded.bounds.size.every((v) => v > 0));
+      assert.equal(downloaded.author, "Kenney");
+      const glb = fs.readFileSync(
+        path.join(workspace, "projects", p.id, downloaded.path),
+      );
+      assert.equal(glb.toString("ascii", 0, 4), "glTF");
+      graphics.shots[0].scene = validateScene({
+        ...graphics.shots[0].scene,
+        camera: { x: 9, y: 6, z: 12 },
+        elements: [
+          {
+            id: "real-ship",
+            type: "model",
+            src: downloaded.path,
+            scale: 1,
+            scale3d: { x: 0.65, y: 0.6, z: 1 },
+            instances: [
+              { x: -2, y: 0, z: 0, scale: 1, rotation: 0 },
+              { x: 3, y: 0, z: -4, scale: 0.8, rotation: 20 },
+            ],
+          },
+          {
+            id: "water",
+            type: "water",
+            width: 200,
+            height: 200,
+            y: 0.08,
+            fill: "#6e939e",
+          },
+          {
+            id: "warehouse",
+            type: "building3d",
+            x: -9,
+            y: 0,
+            z: -8,
+            width: 6,
+            height: 4,
+            depth: 7,
+            fill: "#b7ad98",
+            building: { kind: "warehouse", floors: 1 },
+          },
+        ],
+      });
+      await graphicsPage.evaluate((p) => window.FC.setProject(p), graphics);
+      const actual = await graphicsPage.evaluate(() =>
+        window.FC.renderFrame(0.5),
+      );
+      assert.ok(
+        actual.metrics.some(
+          (m) => m.id === "real-ship" && m.visibleSamples > 0,
+        ),
+      );
+      await captureWindow("test-results/packaged-real-model.png");
+      assert.deepEqual(graphicsErrors, []);
+      console.log(
+        "PASS: packaged app searches official CC0 catalogs, embeds and measures an actual downloaded ship, and renders its geometry/texture against the new reflective water",
+      );
+    }
+    if (process.env.LIVE_PACKAGED_MOTIONS === "1") {
+      const form = new FormData();
+      form.append("kind", "motion");
+      form.append(
+        "file",
+        new Blob([fs.readFileSync(".test-reference-review/samba.fbx")]),
+        "Samba.fbx",
+      );
+      const motion = await call(`/projects/${p.id}/rig-import`, form);
+      assert.equal(Object.keys(motion.mapping).length, 12);
+      const castGraphics = structuredClone(graphics);
+      castGraphics.cast = {
+        main: { body: "female", finish: "glossy", color: "#bc334d" },
+      };
+      castGraphics.shots[0].scene = validateScene({
+        camera: { x: 3, y: 2, z: 5 },
+        cameraRig: {
+          preset: "push-in",
+          distance: 5,
+          height: 1.5,
+          target: { x: 0, y: 0.9, z: 0 },
+          duration: 1,
+        },
+        elements: [
+          {
+            id: "actor",
+            type: "mannequin",
+            castRole: "main",
+            height: 1.8,
+            motionSrc: motion.path,
+          },
+          {
+            id: "ground",
+            type: "box",
+            width: 8,
+            height: 0.1,
+            depth: 8,
+            y: -0.1,
+            fill: "#374754",
+          },
+        ],
+      });
+      await graphicsPage.evaluate((p) => window.FC.setProject(p), castGraphics);
+      const motionFrame = await graphicsPage.evaluate(() =>
+        window.FC.renderFrame(0.5),
+      );
+      assert.ok(
+        motionFrame.metrics.find((m) => m.id === "actor")?.visibleSamples > 0,
+      );
+      await captureWindow("test-results/packaged-cast-motion.png");
+      assert.deepEqual(graphicsErrors, []);
+      console.log(
+        "PASS: packaged FBX loader, actual humanoid retarget, glossy female cast and named camera renderer",
+      );
+      if (process.env.MIXAMO_DIR) {
+        for (const [body, filename] of [
+          ["male", "Y Bot.fbx"],
+          ["female", "X Bot.fbx"],
+        ]) {
+          const form = new FormData();
+          form.append("kind", "character");
+          form.append("source", "mixamo");
+          form.append("body", body);
+          form.append(
+            "file",
+            new Blob([
+              fs.readFileSync(path.join(process.env.MIXAMO_DIR, filename)),
+            ]),
+            filename,
+          );
+          const character = await call(`/projects/${p.id}/rig-import`, form);
+          assert.equal(Object.keys(character.skeleton).length, 12);
+          castGraphics.characterModels = {
+            ...castGraphics.characterModels,
+            [body]: character,
+          };
+          castGraphics.castMode = "mixamo";
+          castGraphics.cast.main.body = body;
+          castGraphics.shots[0].scene.elements[0] = {
+            ...castGraphics.shots[0].scene.elements[0],
+            motionSrc: undefined,
+            pose: "phone",
+            heldProp: { kind: "phone", hand: "right" },
+          };
+          await graphicsPage.evaluate(
+            (p) => window.FC.setProject(p),
+            castGraphics,
+          );
+          const frame = await graphicsPage.evaluate(() =>
+            window.FC.renderFrame(0.5),
+          );
+          assert.ok(
+            frame.metrics.find((m) => m.id === "actor")?.visibleSamples > 0,
+          );
+          await captureWindow(`test-results/packaged-mixamo-${body}.png`);
+        }
+        assert.deepEqual(graphicsErrors, []);
+        const legacy = new FormData();
+        legacy.append("kind", "character");
+        legacy.append("source", "mixamo");
+        legacy.append(
+          "file",
+          new Blob([
+            fs.readFileSync(
+              path.join(process.env.MIXAMO_DIR, "character (2).fbx"),
+            ),
+          ]),
+          "character (2).fbx",
+        );
+        const converted = await call(`/projects/${p.id}/rig-import`, legacy);
+        assert.equal(Object.keys(converted.skeleton).length, 12);
+        castGraphics.cast.main = {
+          ...castGraphics.cast.main,
+          src: converted.path,
+          humanoid: true,
+        };
+        await graphicsPage.evaluate(
+          (p) => window.FC.setProject(p),
+          castGraphics,
+        );
+        const legacyFrame = await graphicsPage.evaluate(() =>
+          window.FC.renderFrame(0.5),
+        );
+        assert.ok(
+          legacyFrame.metrics.find((m) => m.id === "actor")?.visibleSamples > 0,
+        );
+        const inherited = await call("/projects", {
+          title: "Internal inherited Mixamo setup check",
+          style: "3d",
+        });
+        assert.equal(inherited.castMode, "mixamo");
+        assert.ok(
+          inherited.characterModels.male && inherited.characterModels.female,
+        );
+        console.log(
+          "PASS: packaged importer and humanoid actions render the user's actual Mixamo X Bot and Y Bot skins",
+        );
+      }
+    }
     await page
       .locator("#packaged-graphics-check")
       .evaluate((iframe) => iframe.remove());

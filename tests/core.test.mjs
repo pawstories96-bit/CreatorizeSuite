@@ -112,4 +112,8 @@ test("SQLite persists records and each project has reversible git history", asyn
     fs.readFileSync(path.join(root, "app.db")).subarray(0, 15).toString(),
     "SQLite format 3",
   );
+  const commits=await Promise.all(["Worker A","Worker B","Visual repair"].map(message=>store.commit(p.id,message)));
+  assert.equal(new Set(commits).size,3,"Concurrent shot and reviewer commits must each receive their own revision");
+  const log=(await run("git",["log","-3","--format=%s"],{cwd:store.projectDir(p.id)})).stdout.trim().split(/\r?\n/);
+  assert.deepEqual(log,["Visual repair","Worker B","Worker A"]);
 });

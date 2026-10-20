@@ -4,7 +4,7 @@ One local Windows desktop application for AI video production. First launch is e
 
 ## Run
 
-Double-click `Launch Creatorize.cmd` or `release/v0.3.0/win-unpacked/Creatorize Suite.exe`. The portable output is `release/v0.3.0/Creatorize Suite 0.3.0.exe`. Check PROGRESS.md for packaged verification status. The old launcher forwards to the new one.
+Double-click `Launch Creatorize.cmd` or `release/v0.3.2/win-unpacked/Creatorize Suite.exe`. The portable output is `release/v0.3.2/Creatorize Suite 0.3.2.exe`. Check PROGRESS.md for packaged verification status. The old launcher forwards to the new one.
 
 For development:
 
@@ -22,13 +22,16 @@ New desktop workspaces live in `Documents/Creatorize Workspace`. Existing `Docum
    Model dropdowns fetch directly from your connected runtime. In an open project, click the model chip above the chat composer to choose a provider, model and thinking effort for that project. New jobs use your selection; already queued/running jobs keep their captured settings. Choose workspace defaults to return to normal role routing.
 2. Create a project with a topic or paste your script. Review research and narration before generating speech.
 3. Generate a Windows voiceover, import audio, or import a camera recording. Local Whisper generates actual word/phrase timestamps and timed text/SRT. Visually trim pauses or review repeated starts. Accepted cuts remap audio, scenes and camera timing; original media is retained.
-4. Build the video. Review shots while the build continues; use the chat panel for a shot/object/video edit. Shift-drag the timeline to edit all shots overlapping a range. Completed edits include actual Before / After frames and short silent motion clips in the result card and History. Play both starts the paired clips together. Higher review tiers run additional checks.
-5. Import images, MP4s, GLBs or audio in Assets. Live asset tools retrieve CC0 Poly Haven models and small OSM building/road maps with public DEM terrain and attribution. Pick parts saves reference-video In/Out ranges and frame analysis. Build reusable articulated 2D characters and adjust actual renderer effects through Style controls. Use audio as a ducked bed beneath narration.
+4. Build the video. Reconstruction first plans shared environments and downloads relevant CC0 models. Choose Current shot to review one shot before building the rest. The director schedules 1–3 concurrent scene builders; dependent shots reuse an accepted set. Verified independently reviews every shot before acceptance. Assets shows the production plan, source credits and which shots actually use models. Review shots while the build continues; use chat for shot/object/video edits. Shift-drag the timeline to edit overlapping shots. Completed edits include actual Before / After frames and short motion clips in History.
+5. Import images, MP4s, GLBs or audio in Assets. Live asset tools retrieve CC0 Kenney and Poly Haven models and small OSM building/road maps with public DEM terrain and attribution. Pick parts saves reference-video In/Out ranges and frame analysis. Build reusable articulated 2D characters and adjust actual renderer effects through Style controls. Use audio as a ducked bed beneath narration.
    Open **Edit tracks** in the editor to set element cues, timed cards and music/ambience/SFX clips. Run Sound design after changing audio tracks to rebuild the mix.
-6. Export the MP4 and SRT. Optional YouTube publishing requires your own Google OAuth setup and explicit upload review.
+6. In **Cast & motion**, choose **Mixamo characters → Import Mixamo folder** and select your downloaded character folder. X Bot and Y Bot fill the female and male slots; other files become selectable role models. Imports support self-contained FBX / GLB files up to 150 MB each and report individual failures. The two body slots are reused in new projects in this workspace. Choose each role's body, finish and color, preview actions/props, import motions, and apply named camera moves. Supported Mixamo skins use humanoid actions, finger grips and props; arbitrary custom GLBs retain their own embedded clips. Cast changes update existing shots without rebuilding. Older projects have **Update engine** for role migration and an explicit procedural fallback.
+7. Export the MP4 and SRT. Optional broken-scene recovery repairs a failing shot, independently checks its frames and restarts export. It stops after one repair per shot/three per export; encoder/system failures remain visible. Optional YouTube publishing requires your own Google OAuth setup and explicit upload review.
 
 ## New production controls
 
+- The [October update audit](docs/update-video-audit.md) records the full walkthrough review, implemented behavior and limits. The library contains 15 built-in actions and ten named cameras, not the reference's claimed 131 motions. Imported humanoid animation extends the project library. No particular build-time, cost or universal rig compatibility is promised.
+- Studio reconstruction plans shared worlds, automatically retrieves relevant CC0 assets, exposes actual model usage and independently reviews each Verified shot before continuing. Detailed buildings, GPU-instanced scenery, natural articulated figures and an authored generic container-vessel assembly support complete environments.
 - Seven real Canvas/Three.js visual styles and hover previews; reflective water, articulated figures, connected geometry, particles, SSAO, bloom, film grain, outlines, PS1 snapping, fixed-640 pixel rendering and paper halftone effects.
 - Six build tiers. Independent QA inspects full frames and detail crops. Specialist upgrades save real before/after clips. Ultra Edit+ needs an image provider for the target and an AI route for bounded matching; unsuccessful upgrades preserve the original scene.
 - Reference-trained custom style specifications and reusable modules travel with project ZIPs. Scripting skills and phrase/sentence rules are editable per project.
@@ -51,6 +54,7 @@ No paid Anthropic, fal/Higgsfield or signed-in Flow account was available for li
 
 - Git is required for project history. It is installed on the build machine but not bundled.
 - FFmpeg/FFprobe and Chromium are bundled in the Windows output. The renderer does not depend on an open browser.
+- Legacy FBX 6 files use the bundled local FBX2glTF converter. Build preparation downloads its pinned upstream binary and verifies its SHA-256. Original character files are unchanged; converted assets are cached in the workspace.
 - Python 3.13 is used for faster-whisper. On first transcription the app can create a private virtual environment and install faster-whisper; the selected speech model is downloaded once. This needs internet access on first setup.
 - Windows TTS uses installed system voices. ElevenLabs, compatible API/image providers and YouTube are optional and require configuration; unavailable providers produce real errors.
 - Subscription access uses official CLIs only. The app never extracts subscription tokens. API credentials are encrypted for the current OS user.
@@ -76,7 +80,7 @@ node tests/scenes.mjs
 node tests/render-4k.mjs
 node tests/adapters.mjs
 npm run package
-$env:PACKAGED_EXE='release/v0.3.0/win-unpacked/Creatorize Suite.exe'
+$env:PACKAGED_EXE='release/v0.3.2/win-unpacked/Creatorize Suite.exe'
 node tests/desktop.mjs
 node tests/portable.mjs
 ```

@@ -833,6 +833,9 @@ function NewProject({
     try {
       await onCreate({
         ...data,
+        castMode: ["3d", "lowpoly"].includes(data.style)
+          ? "mixamo"
+          : "procedural",
         topic: mode === "topic" ? data.topic : "",
         script: mode === "script" ? data.script : "",
       });
@@ -887,6 +890,13 @@ function NewProject({
             <div className="section-number">
               02 <strong>The look</strong>
             </div>
+            {["3d", "lowpoly"].includes(data.style) && (
+              <p className="form-hint">
+                3D projects use your imported Mixamo characters. Set them up in
+                the editor’s Cast & motion panel; saved body slots carry into
+                new projects.
+              </p>
+            )}
             <div className="form-grid">
               <label>
                 Visual style

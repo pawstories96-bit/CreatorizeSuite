@@ -16,6 +16,15 @@ export type Project = {
   style: string;
   baseStyle?: string;
   styleParams?: any;
+  production?: any;
+  motions?: any[];
+  engineVersion?: number;
+  castMode?: string;
+  characterModels?: Record<string, any>;
+  cast?: Record<
+    string,
+    { body: string; finish: string; color: string; src?: string }
+  >;
   look: string;
   format: string;
   language: string;
@@ -37,7 +46,12 @@ export type Project = {
   cameraCuts?: any[];
   sourceTranscript?: string;
   references?: any[];
-  scriptSettings?: { mode: string; banned: string[]; required: string[]; maxSentenceWords: number };
+  scriptSettings?: {
+    mode: string;
+    banned: string[];
+    required: string[];
+    maxSentenceWords: number;
+  };
   scriptingSkill?: { name: string; text: string };
   mix?: string;
   mixReport?: { ambience: string; levelDb: number; targetLUFS: number };
@@ -55,6 +69,9 @@ export type Job = {
   id: string;
   projectId: string;
   action: string;
+  parentId?: string;
+  crew?: any;
+  crewUsage?: any;
   status: string;
   progress: number;
   createdAt: string;

@@ -26,6 +26,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log("PASS: seven actual style previews render without creating projects or shader errors");
+  const straight=await page.evaluate(async()=>{const {createGeometryObject}=await import('/lib/graphics.js'),points=[{x:0,y:0,z:0},{x:1,y:2,z:0},{x:2,y:0,z:0},{x:3,y:2,z:0}],mesh=createGeometryObject({type:'tube',points,tubeRadius:.04,fill:'#ddd',curve:'linear'},{style:'3d'}),curve=mesh.geometry.parameters.path;let deviation=0;for(let i=0;i<=50;i++){const p=curve.getPointAt(i/50);let distance=Infinity;for(let j=1;j<points.length;j++){const a=points[j-1],b=points[j],dx=b.x-a.x,dy=b.y-a.y,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy)));distance=Math.min(distance,Math.hypot(p.x-a.x-dx*t,p.y-a.y-dy*t));}deviation=Math.max(deviation,distance);}return deviation;});assert.ok(straight<1e-6,'Structural tubes must follow their exact straight segments instead of spline overshoot');
   const scene = validateScene({ background: "#a7bcc5", camera: { x: 7, y: 6, z: 12 }, effects: { ssao: true, bloom: 0.04, grain: 0.025, outline: true }, elements: [
     { id: "water", type: "water", x: 0, y: -0.02, z: 0, width: 25, height: 25, fill: "#8ca2a7" },
     { id: "tank", type: "cylinder", x: -2, y: 1, z: -1, height: 2, radius: 0.6, fill: "#ddd7bd" },

@@ -1,6 +1,24 @@
 # Creatorize Suite
 
-Updated 2026-10-16. One application, no seeded projects. The revised brief is still in progress. Current implementation and remaining gaps are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+Updated 2026-10-20. One application, no seeded projects. The revised brief is still in progress. Current implementation and remaining gaps are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+
+## Version 0.3.2 — reconstruction and Mixamo update
+
+The reconstruction pipeline now plans shared physical sets, retrieves actual credited CC0 models and independently reviews each Verified shot. The editor supports 1–3 concurrent shot builders, saved recovery, project-wide role casting, fifteen actions, eight hand props, ten camera moves and bounded independently reviewed scene repair during export. See [the reference audit](docs/update-video-audit.md) for the walkthrough review and limits.
+
+Actual Mixamo character skins are retained and driven through humanoid bone directions, including fingers and attached props. Cast & motion imports a whole folder, recognizes X Bot / Y Bot, supports per-role model selection and reuses the two body slots for new 3D projects in the workspace. File imports support self-contained FBX / GLB up to 150 MB. A bundled, checksum-verified FBX2glTF converter handles legacy FBX 6 files; original source files are unchanged. Converted characters are cached locally. Missing body setup fails explicitly without AI repair retries. The user's eight supplied files were imported and rendered in isolated workspaces, including the legacy and large textured characters. No character meshes or test projects are shipped.
+
+Source checks passed: 40 unit tests, Next production build and TypeScript, all eight actual character conversions/renders, X/Y Bot actions/props and exact seeking, reusable body assets, cast and camera controls, export recovery into a real MP4, seven style previews and pixel-identical direct frame capture. The actual folder-picker UI also passed with visible male/female meshes, rapid model changes and automatic setup for new 3D projects. These checks do not certify full documentary visual quality.
+
+The final unpacked 0.3.2 Windows app passed empty startup, sandbox/context isolation, OS-encrypted credentials, live Codex catalog/project model selection, a real MP4, official CC0 model acquisition and textured rendering, Three.js effects, actual Mixamo X/Y Bot skins and actions, legacy FBX 6 conversion and Windows speech/audio processing on October 20. Hash checks matched 58 shipped server/player/interface files to source and verified the bundled converter/license. Native screenshots use a bounded hidden capture with a non-focusing fallback for this test's window only.
+
+The single-file portable 0.3.2 passed extraction, empty project/channel/routine/thumbnail lists and the Usage screen. It imported the user's actual X/Y Bot FBX files, restored their assets through a project ZIP and exported a real MP4 whose video stream contains the expected two frames. These short checks do not establish long-documentary speed or quality.
+
+Launch `release/v0.3.2/Creatorize Suite 0.3.2.exe` or `Launch Creatorize.cmd`. Portable size: 274,451,081 bytes. SHA-256: `722F1712C36962DE2B03D6FFCA74FA1CDD17F8BD425E88968B721135FF275F38`. In an existing project, open Cast & motion → Mixamo characters → Import Mixamo folder, select the downloaded folder and apply the cast. Rebuild older flat-character shots to use the new 3D production pipeline.
+
+The reference's 131-motion library, separate model-scout/prop-designer AI sessions, universal custom-rig retargeting and facial animation are not implemented. Live paid providers and signed-in browser generation remain subject to the account-specific limits below. The full revised brief is not complete. Existing user projects were not rebuilt or overwritten by these checks.
+
+## Previous 0.3.0 verification record
 
 Version 0.3 builds successfully. The actual Windows unpacked app passed empty startup, sandbox/context isolation, encrypted credentials, live model discovery/project selection, real MP4 export, Windows speech/audio processing and a dedicated Three.js effects capture. A signed-in Codex edit used the packaged scoped MCP bridge, candidate-frame/preview tools and actual before/after PNG and MP4 captures. The single-file portable build passed extraction, startup, empty project/channel/routine/thumbnail lists, the Usage screen and bundled interface/font notice checks.
 

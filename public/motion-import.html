@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three.module.js",
+          "three/addons/": "/three-addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { FBXLoader } from "/three-addons/loaders/FBXLoader.js";
+      import { GLTFLoader } from "/three-addons/loaders/GLTFLoader.js";
+      import { GLTFExporter } from "/three-addons/exporters/GLTFExporter.js";
+      import { LoadingManager } from "/vendor/three.module.js";
+      import { normalizeMotion, skeletonMap } from "/lib/motion.js";
+      window.importRig = async ({ encoded, format, name, character }) => {
+        const manager = new LoadingManager();
+        let pending = 0,
+          settled,
+          failed = false;
+        const start = manager.itemStart.bind(manager),
+          end = manager.itemEnd.bind(manager);
+        manager.itemStart = (url) => {
+          pending++;
+          start(url);
+        };
+        manager.itemEnd = (url) => {
+          end(url);
+          pending--;
+          if (!pending) settled?.();
+        };
+        manager.onError = () => {
+          failed = true;
+        };
+        manager.setURLModifier((url) => {
+          if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+          if (!character)
+            return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+          throw Error(
+            "External character textures are not supported. Embed textures in the source GLB or FBX.",
+          );
+        });
+        const buffer = Uint8Array.from(atob(encoded), (c) =>
+          c.charCodeAt(0),
+        ).buffer;
+        const loaded =
+            format === "fbx"
+              ? new FBXLoader(manager).parse(buffer, "")
+              : await new GLTFLoader(manager).parseAsync(buffer, ""),
+          root = loaded.scene || loaded,
+          animations = loaded.animations || [];
+        // FBX parsing returns before its embedded images finish loading. Export only
+        // after those requests settle, otherwise textured Mixamo files lose images.
+        if (pending)
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(
+              () =>
+                reject(
+                  Error(
+                    "Character textures did not finish loading within 90 seconds.",
+                  ),
+                ),
+              90000,
+            );
+            settled = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+          });
+        if (character && failed)
+          throw Error(
+            "A character texture could not be decoded. Use an FBX / GLB with supported embedded images.",
+          );
+        if (character) {
+          const result = await new GLTFExporter().parseAsync(root, {
+            binary: true,
+            animations,
+          });
+          const bytes = new Uint8Array(result);
+          let encoded = "";
+          for (let i = 0; i < bytes.length; i += 32768)
+            encoded += String.fromCharCode(...bytes.subarray(i, i + 32768));
+          return {
+            encoded: btoa(encoded),
+            bones: Object.fromEntries(
+              Object.entries(skeletonMap(root)).map(([k, v]) => [k, v.name]),
+            ),
+            clips: animations.map((a) => ({
+              name: a.name,
+              duration: a.duration,
+            })),
+          };
+        }
+        return normalizeMotion(root, animations[0], name);
+      };
+      window.ready = true;
+    </script>
+  </body>
+</html>

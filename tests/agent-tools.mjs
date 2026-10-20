@@ -77,7 +77,9 @@ try {
     (await request("tools/call", { name, arguments: args })).result;
   const current = await call("get_project");
   assert.equal(JSON.parse(current.content[0].text).id, p.id);
-  const renamed = await call("update_storyboard", { shots: [{ id: "s001", title: "Staged title" }] });
+  const renamed = await call("update_storyboard", {
+    shots: [{ id: "s001", title: "Staged title" }],
+  });
   assert.equal(renamed.isError, undefined);
   assert.equal(job.toolDrafts.titles[0].title, "Staged title");
   assert.notEqual(service.store.project(p.id).shots[0].title, "Staged title");
@@ -88,15 +90,22 @@ try {
   const staged = await call("set_ambience", { clips: [] });
   assert.equal(staged.isError, undefined);
   assert.ok(job.toolDrafts.timeline);
-  const proposed = await call("save_memory_rule", { text: "Keep short labels readable" });
+  const proposed = await call("save_memory_rule", {
+    text: "Keep short labels readable",
+  });
   const proposalId = JSON.parse(proposed.content[0].text).id;
   assert.equal(service.store.all("memory").length, 0);
   assert.ok(service.store.get("memoryProposals", proposalId));
-  const approved = await fetch(`${service.url}/api/memory-proposals/${proposalId}/approve`, { method: "POST", headers: { Origin: service.url } });
+  const approved = await fetch(
+    `${service.url}/api/memory-proposals/${proposalId}/approve`,
+    { method: "POST", headers: { Origin: service.url } },
+  );
   assert.equal(approved.status, 200);
   assert.ok(service.store.get("memory", proposalId));
   delete job.toolDrafts;
-  console.log("PASS: tool changes stay staged, scoped edits cannot change global tracks, memory requires approval");
+  console.log(
+    "PASS: tool changes stay staged, scoped edits cannot change global tracks, memory requires approval",
+  );
   const frames = await call("render_frames", {
     shotId: "s001",
     scene,
@@ -157,6 +166,23 @@ try {
     service.store.project(p.id).shots[0].scene,
     null,
     "Draft previews must not save scene changes",
+  );
+  p.shots[0].scene = scene;
+  service.store.saveProject(p);
+  const summary = JSON.parse((await call("get_project")).content[0].text);
+  assert.equal(
+    summary.shots[0].scene,
+    undefined,
+    "Default project reads must not resend all completed geometry",
+  );
+  assert.equal(summary.shots[0].sceneSummary.elements, 1);
+  const detailed = JSON.parse(
+    (await call("get_project", { shotId: "s001" })).content[0].text,
+  );
+  assert.deepEqual(
+    detailed.shots[0].scene,
+    scene,
+    "Explicit shot reads retain complete editable source",
   );
   assert.equal(
     (await call("render_frames", { shotId: "outside-project", scene })).isError,

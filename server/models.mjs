@@ -4,6 +4,11 @@ import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { publicDownload } from "./research.mjs";
 import { atomic, read } from "./core.mjs";
+import {
+  searchKenney,
+  downloadKenney,
+  documentBounds,
+} from "./kenney-models.mjs";
 async function officialJSON(url) {
   return JSON.parse(
     (await publicDownload(url, 12 * 1024 * 1024)).bytes.toString("utf8"),
@@ -30,7 +35,15 @@ export async function searchModels(store, query) {
     .filter(Boolean);
   if (!words.length || words.join(" ").length > 150)
     throw Error("Enter a model search up to 150 characters");
-  return Object.entries(await modelCatalog(store))
+  const found = await Promise.allSettled([
+    searchKenney(store, query),
+    modelCatalog(store),
+  ]);
+  if (found.every((r) => r.status === "rejected"))
+    throw Error(found.map((r) => r.reason.message).join("; "));
+  const haven = Object.entries(
+    found[1].status === "fulfilled" ? found[1].value : {},
+  )
     .filter(
       ([id, item]) =>
         item.type === 2 &&
@@ -54,8 +67,25 @@ export async function searchModels(store, query) {
       dimensionsMeters: item.dimensions?.map((v) => v / 1000),
       polycount: item.polycount,
     }));
+  // Include both catalogs; an outage in one provider must not hide the other.
+  const kenney = found[0].status === "fulfilled" ? found[0].value : [];
+  const results = Array.from(
+    { length: Math.max(haven.length, kenney.length) },
+    (_, i) => [haven[i], kenney[i]].filter(Boolean),
+  )
+    .flat()
+    .slice(0, 40);
+  if (!results.length && found.some((r) => r.status === "rejected"))
+    throw Error(
+      `Model search was incomplete: ${found
+        .filter((r) => r.status === "rejected")
+        .map((r) => r.reason.message)
+        .join("; ")}`,
+    );
+  return results;
 }
 export async function downloadModel(store, p, id, job = {}, emit = () => {}) {
+  if (id.startsWith("kenney:")) return downloadKenney(store, p, id, job, emit);
   if (!/^[\w-]+$/.test(id)) throw Error("Choose a model ID from the catalog");
   const info = (await modelCatalog(store))[id];
   if (!info || info.type !== 2)
@@ -112,6 +142,7 @@ export async function downloadModel(store, p, id, job = {}, emit = () => {}) {
   const rel = `assets/model-${id}-${crypto.createHash("sha256").update(binary).digest("hex").slice(0, 12)}.glb`;
   atomic(path.join(store.projectDir(p.id), rel), binary);
   const record = {
+    id,
     path: rel,
     name: info.name,
     license: "CC0",
@@ -119,7 +150,9 @@ export async function downloadModel(store, p, id, job = {}, emit = () => {}) {
     source: `https://polyhaven.com/a/${id}`,
     licenseSource: "https://polyhaven.com/license",
     retrievedAt: new Date().toISOString(),
-    dimensionsMeters: info.dimensions?.map((v) => v / 1000),
+    dimensionsMeters: documentBounds(document).size,
+    bounds: documentBounds(document),
+    sha256: crypto.createHash("sha256").update(binary).digest("hex"),
     embeddedResources: includes.length,
   };
   const ledgerFile = path.join(

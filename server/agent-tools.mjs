@@ -5,6 +5,7 @@ import { validateScene, read, run, safePath, uid } from "./core.mjs";
 import { fetchResearch, searchResearch } from "./research.mjs";
 import { validateTimeline } from "./timeline.mjs";
 import { searchModels, downloadModel } from "./models.mjs";
+import { composeProductionScene } from "./production.mjs";
 import { fetchMap } from "./maps.mjs";
 
 const object = (properties = {}, required = []) => ({
@@ -38,13 +39,13 @@ export const agentTools = [
   {
     name: "search_models",
     description:
-      "Search the public Poly Haven CC0 catalog for real 3D props. Returns IDs, author/source/license and approximate dimensions. Does not invent model URLs.",
+      "Search official Poly Haven and Kenney CC0 catalogs for real 3D props, ships, vegetation, vehicles and environment assets. Returns actual IDs and source/license records. Downloads include native geometry bounds for correct scale and placement.",
     inputSchema: object({ query: { type: "string" } }, ["query"]),
   },
   {
     name: "download_model",
     description:
-      "Download a real CC0 catalog model by ID, verify published checksums and embed its geometry/textures into one local GLB. Returns the asset path and attribution.",
+      "Download a real CC0 catalog model by ID from its official source, check available published checksums, and embed geometry/textures into one local GLB. Returns native bounds, an integrity hash, asset path and attribution.",
     inputSchema: object({ id: { type: "string" } }, ["id"]),
   },
   {
@@ -117,8 +118,8 @@ export const agentTools = [
   {
     name: "get_project",
     description:
-      "Read this job's project, shot IDs, narration, word timing and saved scene source.",
-    inputSchema: object(),
+      "Read project metadata, shot IDs, narration, word timing and compact scene summaries. Supply shotId to read that shot's complete saved scene; avoid rereading every completed shot's geometry.",
+    inputSchema: object({ shotId: { type: "string" } }),
   },
   {
     name: "get_words",
@@ -143,7 +144,7 @@ export const agentTools = [
   {
     name: "measure_layout",
     description:
-      "Measure text and 3D screen bounds, overflow, text overlaps, sampled 3D raycast visibility, marked grounded objects and collision-group bounding volumes at a shot-relative time. Bounds and collisions are conservative review candidates, not exact mesh-intersection proofs. Path bounds are not measured.",
+      "Measure text and 3D screen bounds, overflow, text overlaps, sampled raycast visibility for essential subjects/models/figures, marked grounded objects and collision-group bounding volumes at a shot-relative time. Bounds and collisions are conservative review candidates, not exact mesh-intersection proofs. Path bounds are not measured.",
     inputSchema: object(
       { ...shotInput, time: { type: "number", minimum: 0 } },
       ["shotId"],
@@ -427,24 +428,56 @@ export class AgentTools {
             ),
           ],
         };
-      if (name === "get_project")
+      if (name === "get_project") {
+        if (args.shotId && !p.shots.some((s) => s.id === args.shotId))
+          throw Error("Unknown shot ID");
         return {
           content: [
             text({
               id: p.id,
               title: p.title,
               format: p.format,
+              style: p.style,
+              look: p.look,
+              direction: p.direction,
               words: p.words,
-              shots: p.shots,
+              shots: p.shots.map((s) =>
+                args.shotId === s.id
+                  ? s
+                  : {
+                      id: s.id,
+                      title: s.title,
+                      start: s.start,
+                      end: s.end,
+                      narration: s.narration,
+                      status: s.status,
+                      sceneSummary: s.scene
+                        ? {
+                            elements: s.scene.elements.length,
+                            modelPaths: [
+                              ...new Set(
+                                s.scene.elements
+                                  .filter((e) => e.type === "model")
+                                  .map((e) => e.src),
+                              ),
+                            ],
+                          }
+                        : null,
+                    },
+              ),
             }),
           ],
         };
+      }
       const shot = p.shots.find((s) => s.id === args.shotId);
+      if(session.job.options?.scope==="shot" && session.job.options?.shotId && args.shotId!==session.job.options.shotId)
+        throw Error("This scene builder is restricted to its assigned shot");
       if (!shot)
         throw Error(
           "Unknown shot ID; use get_project to list this project's shots",
         );
-      if (args.scene) shot.scene = validateScene(args.scene);
+      if (args.scene)
+        shot.scene = validateScene(composeProductionScene(p, shot, args.scene));
       if (!shot.scene)
         throw Error("This shot has no scene; supply a candidate scene");
       if (name === "check_preview")

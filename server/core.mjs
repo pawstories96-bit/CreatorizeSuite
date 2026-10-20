@@ -6,6 +6,8 @@ import initSqlJs from "sql.js";
 import { z } from "zod";
 import { expandKits } from "./style-kits.mjs";
 import { styleProfiles, geometryTypes } from "../public/lib/styles.js";
+import { castRoles } from "../public/lib/cast.js";
+import { cameraMoves } from "../public/lib/cameras.js";
 
 export const stages = [
   "script",
@@ -202,16 +204,53 @@ const element = z.object({
   path: z.string().default(""),
   src: z.string().default(""),
   scale: z.number().positive().max(1000).default(1),
+  scale3d: z
+    .object({
+      x: z.number().positive().max(100),
+      y: z.number().positive().max(100),
+      z: z.number().positive().max(100),
+    })
+    .optional(),
+  instances: z
+    .array(
+      z.object({
+        x: z.number(),
+        y: z.number(),
+        z: z.number(),
+        scale: z.number().positive().max(1000).default(1),
+        rotation: z.number().default(0),
+      }),
+    )
+    .min(1)
+    .max(500)
+    .optional(),
+  building: z
+    .object({
+      kind: z.enum(["warehouse", "office", "house"]).default("warehouse"),
+      floors: z.number().int().min(1).max(16).optional(),
+      roofColor: z.string().default("#515c65"),
+      windowColor: z.string().default("#526c7c"),
+    })
+    .optional(),
+  vessel: z
+    .object({
+      cargoLevels: z.number().int().min(1).max(7).default(5),
+      hullColor: z.string().default("#273c50"),
+    })
+    .optional(),
   offset: z.number().min(0).default(0),
   loop: z.boolean().default(true),
   phase: z.number().default(0),
   essential: z.boolean().default(false),
+  framing: z.enum(["full", "detail"]).default("full"),
   grounded: z.boolean().default(false),
   collisionGroup: z.string().max(100).optional(),
   keyframes: z.array(keyframe).max(100).optional(),
   material: z
     .object({
       roughness: z.number().min(0).max(1).default(0.85),
+      tint: z.string().optional(),
+      recolor: z.boolean().optional(),
       metalness: z.number().min(0).max(1).default(0),
       emissive: z.string().optional(),
       emissiveIntensity: z.number().min(0).max(10).default(0),
@@ -227,12 +266,55 @@ const element = z.object({
     .max(400)
     .optional(),
   tubeRadius: z.number().positive().max(100).default(0.08),
+  curve: z.enum(["linear", "smooth"]).default("linear"),
   segments: z.number().int().min(3).max(128).default(24),
   highlight: z.boolean().default(false),
   role: z
     .enum(["actor", "protagonist", "bystander", "neutral"])
     .default("neutral"),
-  pose: z.enum(["idle", "walk", "run", "sit", "point", "fall"]).default("idle"),
+  castRole: z.enum(castRoles).optional(),
+  body: z.enum(["male", "female"]).default("male"),
+  finish: z.enum(["matte", "glossy", "glow"]).default("matte"),
+  pose: z
+    .enum([
+      "idle",
+      "walk",
+      "run",
+      "sit",
+      "sit-down",
+      "stand-up",
+      "point",
+      "fall",
+      "wave",
+      "talk",
+      "phone",
+      "carry",
+      "reach",
+      "crouch",
+      "celebrate",
+    ])
+    .default("idle"),
+  heldProp: z
+    .object({
+      kind: z.enum([
+        "phone",
+        "scanner",
+        "cup",
+        "paper",
+        "briefcase",
+        "bag",
+        "staff",
+        "bat",
+      ]),
+      hand: z.enum(["left", "right", "both"]).default("right"),
+    })
+    .optional(),
+  motionSrc: z
+    .string()
+    .regex(/^assets\/[\w/-]+\.motion\.json$/)
+    .optional(),
+  motionSpeed: z.number().positive().max(4).default(1),
+  clip: z.string().max(160).optional(),
   expression: z
     .enum(["neutral", "happy", "sad", "surprised", "angry"])
     .default("neutral"),
@@ -270,6 +352,14 @@ const element = z.object({
 export const sceneSchema = z.object({
   background: z.string().default("#172b32"),
   label: z.string().default(""),
+  environment: z
+    .object({
+      kind: z.enum(["exterior", "interior", "technical"]),
+      skyTop: z.string().default("#7ba6cb"),
+      skyHorizon: z.string().default("#d6e1e5"),
+    })
+    .optional(),
+  cameraFov: z.number().min(20).max(90).optional(),
   effects: z
     .object({
       ssao: z.boolean().optional(),
@@ -290,7 +380,11 @@ export const sceneSchema = z.object({
   camera: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
   cameraRig: z
     .object({
-      type: z.enum(["orbit", "dolly"]),
+      type: z.enum(["orbit", "dolly"]).default("dolly"),
+      preset: z.enum(cameraMoves.map(([id]) => id)).optional(),
+      distance: z.number().positive().max(3000).optional(),
+      azimuth: z.number().min(-360).max(360).optional(),
+      amount: z.number().min(0).max(0.8).optional(),
       target: z
         .object({ x: z.number(), y: z.number(), z: z.number() })
         .default({ x: 0, y: 1, z: 0 }),
@@ -298,6 +392,10 @@ export const sceneSchema = z.object({
       height: z.number().default(8),
       speed: z.number().default(0.12),
       to: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
+      targetTo: z
+        .object({ x: z.number(), y: z.number(), z: z.number() })
+        .optional(),
+      easing: z.enum(["linear", "smooth"]).default("linear"),
       duration: z.number().positive().default(5),
     })
     .optional(),
@@ -317,6 +415,8 @@ export function validateScene(scene) {
   const dimensions = {
     character2d: { width: 260, height: 350 },
     mannequin: { width: 0.5, height: 1.8, radius: 0.16 },
+    building3d: { width: 12, height: 8, depth: 10 },
+    vessel3d: { width: 44, height: 42, depth: 270 },
     capsule: { radius: 0.2, height: 1 },
     torus: { radius: 1 },
     plane: { width: 20, height: 20 },
@@ -333,6 +433,20 @@ export function validateScene(scene) {
   if (new Set(result.elements.map((e) => e.id)).size !== result.elements.length)
     throw Error("Scene element IDs must be unique");
   for (const e of result.elements) {
+    if (
+      e.type === "vessel3d" &&
+      (e.width < 8 ||
+        e.height < 8 ||
+        e.depth < 35 ||
+        e.width > 80 ||
+        e.height > 100 ||
+        e.depth > 500)
+    )
+      throw Error(
+        "Use vessel dimensions of 8–80m beam, 8–100m height and 35–500m length",
+      );
+    if (e.instances && e.type !== "model")
+      throw Error("Model instances require a model element");
     if (
       e.type === "terrain" &&
       (!e.gridSize ||
@@ -371,6 +485,24 @@ export function validateStyleParams(input = {}) {
   if (value.effects?.fog && value.effects.fog.far <= value.effects.fog.near)
     throw Error("Fog far distance must exceed its near distance");
   return value;
+}
+
+export function validateCast(input = {}) {
+  const choice = z.object({
+    body: z.enum(["male", "female"]),
+    finish: z.enum(["matte", "glossy", "glow"]),
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+    src: z
+      .string()
+      .regex(/^assets\/[\w/-]+\.glb$/)
+      .optional(),
+    humanoid: z.boolean().optional(),
+  });
+  return z
+    .object(
+      Object.fromEntries(castRoles.map((role) => [role, choice.optional()])),
+    )
+    .parse(input);
 }
 export function topo(nodes, edges) {
   const ids = new Set(nodes.map((n) => n.id));
@@ -537,10 +669,27 @@ export class Store {
     const p = {
       id: uid(),
       title: input.title.trim().slice(0, 180),
+      engineVersion: 3,
       topic: input.topic || "",
       direction: input.direction || "",
       style: input.style || "flat",
       styleParams: validateStyleParams(input.styleParams),
+      ...(input.cast ? { cast: validateCast(input.cast) } : {}),
+      castMode:
+        input.castMode === "mixamo" ||
+        (input.castMode !== "procedural" &&
+          ["3d", "lowpoly"].includes(input.style) &&
+          this.all("characterBodies").some(
+            (b) =>
+              b.body === "male" &&
+              b.workspaceId ===
+                (input.workspaceId ||
+                  this.settings().activeWorkspace ||
+                  "personal"),
+          ))
+          ? "mixamo"
+          : "procedural",
+      characterModels: {},
       look: input.look || "Bold & bright",
       format: input.format || "16:9",
       language: input.language || "en",
@@ -566,8 +715,26 @@ export class Store {
     const dir = this.projectDir(p.id);
     for (const sub of ["audio", "scenes", "assets", "exports", "sound"])
       fs.mkdirSync(path.join(dir, sub), { recursive: true });
+    const bodyAssets = [];
+    if (p.castMode === "mixamo")
+      for (const body of this.all("characterBodies").filter(
+        (b) => b.workspaceId === p.workspaceId,
+      )) {
+        if (
+          !body.storedPath ||
+          !fs.existsSync(safePath(this.root, body.storedPath))
+        )
+          continue;
+        const { storedPath, id, workspaceId, ...record } = body;
+        fs.copyFileSync(
+          safePath(this.root, storedPath),
+          safePath(dir, record.path),
+        );
+        p.characterModels[body.body] = record;
+        bodyAssets.push(record);
+      }
     atomic(path.join(dir, "script.txt"), p.script);
-    atomic(path.join(dir, "assets", "ATTRIBUTIONS.json"), []);
+    atomic(path.join(dir, "assets", "ATTRIBUTIONS.json"), bodyAssets);
     atomic(
       path.join(dir, ".gitignore"),
       "audio/\nexports/\nassets/\n.frames/\n",
@@ -584,6 +751,17 @@ export class Store {
     return p;
   }
   async commit(id, message) {
+    this.commitQueues ??= new Map();
+    const previous = this.commitQueues.get(id) || Promise.resolve(),
+      task = previous.catch(() => {}).then(() => this.commitNow(id, message));
+    this.commitQueues.set(id, task);
+    try {
+      return await task;
+    } finally {
+      if (this.commitQueues.get(id) === task) this.commitQueues.delete(id);
+    }
+  }
+  async commitNow(id, message) {
     const cwd = this.projectDir(id);
     await run(
       "git",

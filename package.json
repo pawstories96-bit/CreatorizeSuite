@@ -1,6 +1,6 @@
 {
   "name": "creatorize-suite",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "description": "Local AI video production, editing and rendering studio",
   "author": "Creatorize Suite",
@@ -57,7 +57,7 @@
     "appId": "studio.framecraft.desktop",
     "productName": "Creatorize Suite",
     "directories": {
-      "output": "release/v0.3.0"
+      "output": "release/v0.3.2"
     },
     "files": [
       "out/**/*",
@@ -80,6 +80,10 @@
       "signExecutable": false
     },
     "extraResources": [
+      {
+        "from": "resources/models",
+        "to": "models"
+      },
       {
         "from": "resources/ffmpeg",
         "to": "ffmpeg"
