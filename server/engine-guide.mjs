@@ -1,4 +1,5 @@
-export const engineGuide = `
+import { reconstructionGuide } from "./reconstruction-guide.mjs";
+export const engineGuide = `${reconstructionGuide}
 ## Creatorize graphics runtime
 Use coherent physical geometry and specific assemblies, never generic blocks standing in for real subjects. Return a complete declarative scene which the shared Three.js/Canvas engine renders in real time.
 For essential 3D subjects, framing:'full' keeps the complete object in view. For an intentional bow/mechanism/face close-up, use framing:'detail': the subject must remain visible but its full bounding box may extend beyond the frame. Do not widen a purposeful close-up merely to fit an entire vessel or building.

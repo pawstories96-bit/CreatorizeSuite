@@ -1,4 +1,6 @@
+import { reconstructionLooks } from "./reconstruction/catalog.js";
 export const geometryTypes = [
+  "reconstruction3d",
   "terrain",
   "model",
   "building3d",
@@ -22,7 +24,7 @@ export const styleProfiles = [
     id: "3d",
     name: "3D reconstruction",
     look: "Studio",
-    looks: ["Studio", "Investigation"],
+    looks: ["Studio", "Investigation", ...Object.keys(reconstructionLooks)],
     color: "#c8d4df",
     description:
       "Complete environments, faceless white figures, real assets and cinematic reconstructions.",
@@ -34,7 +36,7 @@ export const styleProfiles = [
       "character",
     ],
     guide:
-      "Build coherent physical worlds at meter scale. Studio: full natural environments with sky/horizon, terrain, vegetation and buildings where appropriate, real colored materials, natural shadows and smooth faceless white human figures with anatomically articulated limbs. Use blue sparingly to identify an individual, unless the project cast specifies another color. Establish geography, then track action, then show a meaningful close-up; reuse the same location and hero geometry. At most two small labels in ordinary 3D shots, often none. Reserve isolated white-clay or dark cutaways for explicit mechanism explanations, and archival/document cards for separate evidence shots. Investigation is a lighting/material look for ANY topic, including sports, business, history and science: dark environments, one motivated cool key, glossy faceless people and restrained subject highlights. Add crime/evidence-board imagery only when the actual narration calls for it. Never invent suspects, crimes, red strings or police for unrelated topics. Retrieve and actually use relevant licensed GLB assets; build specific connected machinery when no exact model exists. Never use unexplained blocks as specialist machinery or put flat 2D people inside a physical reconstruction.",
+      "Use the integrated aiTrends reconstruction3d toolkit for detailed interiors, locations, mechanisms and maps where appropriate. The selected named look (White clay/Daylight/Golden hour/Dusk/Night/Overcast/Dark map/Mechanism studio) takes precedence over the default Studio direction below. White clay uses off-white cutaway interiors and soft contact shading; documentary cards show sourced evidence and word-timed excerpt highlights. Build coherent physical worlds at meter scale. Studio: full natural environments with sky/horizon, terrain, vegetation and buildings where appropriate, real colored materials, natural shadows and smooth faceless white human figures with anatomically articulated limbs. Use blue sparingly to identify an individual, unless the project cast specifies another color. Establish geography, then track action, then show a meaningful close-up; reuse the same location and hero geometry. At most two small labels in ordinary 3D shots, often none. Reserve isolated white-clay or dark cutaways for explicit mechanism explanations, and archival/document cards for separate evidence shots. Investigation is a lighting/material look for ANY topic, including sports, business, history and science: dark environments, one motivated cool key, glossy faceless people and restrained subject highlights. Add crime/evidence-board imagery only when the actual narration calls for it. Never invent suspects, crimes, red strings or police for unrelated topics. Retrieve and actually use relevant licensed GLB assets; build specific connected machinery when no exact model exists. Never use unexplained blocks as specialist machinery or put flat 2D people inside a physical reconstruction.",
   },
   {
     id: "lowpoly",

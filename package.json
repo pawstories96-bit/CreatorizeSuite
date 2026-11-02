@@ -1,6 +1,6 @@
 {
   "name": "creatorize-suite",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Local AI video production, editing and rendering studio",
   "author": "Creatorize Suite",
@@ -57,7 +57,7 @@
     "appId": "studio.framecraft.desktop",
     "productName": "Creatorize Suite",
     "directories": {
-      "output": "release/v0.3.2"
+      "output": "release/v0.3.3"
     },
     "files": [
       "out/**/*",
@@ -72,7 +72,8 @@
       "public/lib/styles.js",
       "public/lib/quality.js",
       "public/lib/workflow.js",
-      "server/**/*"
+      "server/**/*",
+      "public/lib/reconstruction/catalog.js"
     ],
     "win": {
       "icon": "public/icon.ico",

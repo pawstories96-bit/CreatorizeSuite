@@ -7,6 +7,10 @@ import { z } from "zod";
 import { expandKits } from "./style-kits.mjs";
 import { styleProfiles, geometryTypes } from "../public/lib/styles.js";
 import { castRoles } from "../public/lib/cast.js";
+import {
+  reconstructionSchema,
+  evidenceSchema,
+} from "./reconstruction-schema.mjs";
 import { cameraMoves } from "../public/lib/cameras.js";
 
 export const stages = [
@@ -224,6 +228,7 @@ const element = z.object({
     .min(1)
     .max(500)
     .optional(),
+  reconstruction: reconstructionSchema.optional(),
   building: z
     .object({
       kind: z.enum(["warehouse", "office", "house"]).default("warehouse"),
@@ -350,6 +355,21 @@ const element = z.object({
   duration: z.number().min(0.05).default(1),
 });
 export const sceneSchema = z.object({
+  evidence: evidenceSchema.optional(),
+  reconstructionLook: z
+    .enum([
+      "clay",
+      "day",
+      "golden",
+      "dusk",
+      "night",
+      "overcast",
+      "darkmap",
+      "studio",
+    ])
+    .optional(),
+  footnote: z.string().max(500).optional(),
+  timeChip: z.string().max(100).optional(),
   background: z.string().default("#172b32"),
   label: z.string().default(""),
   environment: z
@@ -412,6 +432,9 @@ export const sceneSchema = z.object({
 });
 export function validateScene(scene) {
   const expanded = expandKits(scene);
+  for (const e of expanded?.elements || [])
+    if (e.type === "reconstruction3d" && !e.reconstruction)
+      throw Error("reconstruction3d requires reconstruction.kind and options");
   const dimensions = {
     character2d: { width: 260, height: 350 },
     mannequin: { width: 0.5, height: 1.8, radius: 0.16 },

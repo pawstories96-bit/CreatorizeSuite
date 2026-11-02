@@ -1,6 +1,16 @@
 # Creatorize Suite
 
-Updated 2026-10-20. One application, no seeded projects. The revised brief is still in progress. Current implementation and remaining gaps are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+Updated 2026-11-02. One application, no seeded projects. The revised brief is still in progress. Current implementation and remaining gaps are tracked in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+
+## Version 0.3.3 — supplied reconstruction toolkit
+
+Integrated the user's aiTrends reconstruction toolkit into the existing 3D reconstruction style. The runtime now exposes 27 detailed geometry/map builders, deterministic train/door/route animation, eight additional lighting looks, local geographic data, and sourced quote/article/stat/statement/chart cards with word-timed excerpt highlights. Project **Style → Reconstruction look** changes preview/export lighting; existing scene geometry needs a build/edit to gain new detail. AI build/edit/review guidance includes the supported assemblies and documentary shot grammar. Mixamo casting remains explicit. No standalone toolkit app or demo projects are installed. See [integration details and scope](docs/reconstruction-toolkit.md).
+
+Source validation passed: 43 automated tests, Next production build, TypeScript, all 27 actual rendered builders, eight distinct look frames, pixel-exact backward seeking, landscape/portrait evidence cards and a real four-frame MP4 verified with FFprobe. Existing vessel geometry and cast/motion/hand-prop tests passed. The package integrity check matched 94 source/data/font files, the rounded-geometry addon and legacy FBX converter; original demo projects, Python environments and user FBX files are excluded.
+
+The final unpacked 0.3.3 Windows executable passed empty startup, actual cockpit rendering, in-project look selection and reload persistence, all eight toolkit previews, bundled offline maps and a real MP4 export with the expected four decoded frames. Visual review moved an obstructing foreground tree belt behind the location preview and increased the dark map's land contrast before the final package. Tests use only isolated workspaces and do not rebuild the user's documentary.
+
+The final single-file 0.3.3 executable passed extraction/startup with empty project/channel/routine/thumbnail lists, Usage navigation, actual X/Y Bot FBX import and a ZIP restore, then exported a real two-frame video with the imported character inside the toolkit's cutaway room. Launch `Launch Creatorize.cmd` or `release/v0.3.3/Creatorize Suite 0.3.3.exe`. Portable size: 305,343,372 bytes. SHA-256: `765d064816e51e1a2aba8c06fa8a37aafb58c0fa1328c6d6434e2971b0fc1cb9`.
 
 ## Version 0.3.2 — reconstruction and Mixamo update
 

@@ -1,6 +1,10 @@
 # Creatorize Suite implementation plan
 
-Updated 2026-10-20 from the user's revised brief. One application; no seeded example projects. Existing user projects and credentials must remain usable.
+Updated 2026-11-02 from the user's revised brief. One application; no seeded example projects. Existing user projects and credentials must remain usable.
+
+## Supplied reconstruction toolkit — 0.3.3
+
+The supplied aiTrends kit is adapted to the existing validated scene/render pipeline: detailed aircraft interiors, location props, cutaway rooms, coaster/train geometry, instanced vegetation, offline geographic maps/routes, eight lighting presets and sourced documentary evidence cards. The project Style controls expose look changes, and agent guidance includes actual supported options and physical conventions. See [scope and verification](docs/reconstruction-toolkit.md). This is not an import of the standalone demo project or its unrestricted scene-script runtime; existing voice/audio, assets, Mixamo and export services remain in use. Existing documentary shots have not been automatically rebuilt.
 
 ## Latest checkpoint — reconstruction, crew and Mixamo
 

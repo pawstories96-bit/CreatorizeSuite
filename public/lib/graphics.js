@@ -7,6 +7,7 @@ import { UnrealBloomPass } from "/three-addons/postprocessing/UnrealBloomPass.js
 import { FilmPass } from "/three-addons/postprocessing/FilmPass.js";
 import { OutlinePass } from "/three-addons/postprocessing/OutlinePass.js";
 import { OutputPass } from "/three-addons/postprocessing/OutputPass.js";
+import { createReconstructionObject } from "./reconstruction/adapter.js";
 import { createContainerVessel } from "./vessels.js";
 import { createMannequin } from "./mannequins.js";
 const rad = (value) => (value * Math.PI) / 180;
@@ -263,6 +264,7 @@ function evidenceBoard(e, project) {
   return root;
 }
 export function createGeometryObject(e, project) {
+  if (e.type === "reconstruction3d") return createReconstructionObject(e);
   if (e.type === "vessel3d") return createContainerVessel(e);
   if (e.type === "building3d") return building3d(e, project);
   if (e.type === "mannequin")
@@ -461,7 +463,10 @@ export function createPostProcessing(
       Float32Array.from({ length: 16 }, (_, i) => seeded(91, i) * 2 - 1),
     );
     pass.noiseTexture.needsUpdate = true;
-    pass.kernelRadius = 3;
+    pass.kernelRadius =
+      scene.reconstructionLook === "clay" || project.look === "White clay"
+        ? 0.7
+        : 3;
     pass.minDistance = 0.002;
     pass.maxDistance = 0.04;
     composer.addPass(pass);

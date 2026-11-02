@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { atomic, read, safePath } from "./core.mjs";
 import { searchModels, downloadModel } from "./models.mjs";
+import { reconstructionLooks } from "../public/lib/reconstruction/catalog.js";
 
 export const studioDirection = `Studio reconstruction means a complete inhabited physical world: terrain/ground, horizon/sky for exteriors, buildings/vegetation where appropriate, foreground/middle/background depth, motivated light and shadows. Use naturally proportioned faceless white 3D people, with blue only to identify a specific person. Never use flat character2d icons in a physical reconstruction. Use colored real materials for vessels, equipment, landscape and buildings. Reserve empty backgrounds and isolated cutaways for explicit technical explanations. Reuse the same environment, coordinates, hero assemblies and assets across related shots. Alternate establishing, tracking/POV and mechanism close-ups according to the narration; animate the event itself. Most shots need zero text; at most two small factual labels. Do not cover the scene with diagrams, clocks, title cards, narration text or repeated RECONSTRUCTION labels. The player supplies a discreet reconstruction label. Use detailed building3d environments and, where appropriate, the generic authored vessel3d assembly. Use model instances to populate scenery densely. Do not stretch an unsuitable small toy model into a historically distinctive hero; choose bespoke geometry or a suitable assembly, and retrieve fitting CC0 component/environment assets instead. Do not copy the reference's story, branding or assets or claim a generic model is a precise historical replica.`;
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
@@ -50,6 +51,7 @@ export const assetLedger = (store, p) =>
   read(path.join(store.projectDir(p.id), "assets", "ATTRIBUTIONS.json"), []);
 export const isStudio = (p) => (p.baseStyle || p.style) === "3d";
 export function reconstructionDirection(p) {
+  const kitLook = reconstructionLooks[p.look];
   const base =
     p.look === "Investigation"
       ? studioDirection.replace(
@@ -58,7 +60,9 @@ export function reconstructionDirection(p) {
         )
       : studioDirection;
   return (
-    base +
+    (kitLook
+      ? `Use the integrated aiTrends reconstruction toolkit and the selected ${p.look} look. Build coherent detailed sets with real metre-scale geometry. ${kitLook === "clay" ? "Off-white matte cutaway interiors, articulated faceless figures, soft daylight and contact shadows; shape carries the information. No outdoor sky required for interior cutaways." : "Build the complete place with motivated light appropriate to the selected look; use isolated dark or clay sets for mechanisms."} Reuse set coordinates across shots. Alternate wide geography, action/details and supporting evidence. Keep text restrained, show sourced footnotes and exact evidenced times, label unknowns explicitly. Use reconstruction3d assemblies where appropriate and retrieve fitting licensed assets; never call a procedural kit a downloaded asset. Use the existing cast for people. `
+      : base) +
     (p.cast
       ? ` Project cast overrides default body, color and finish: ${JSON.stringify(p.cast)}. Evaluate these selected appearances; do not request white or blue in place of an explicit project choice.`
       : "")
@@ -68,7 +72,7 @@ export function reconstructionDirection(p) {
 export async function prepareProduction(store, p, job, generate, emit) {
   const direction = job.options.direction || p.direction || "";
   const fingerprint = hash({
-    version: 2,
+    version: 3,
     style: p.style,
     look: p.look,
     format: p.format,

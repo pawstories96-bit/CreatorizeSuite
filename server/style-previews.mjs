@@ -383,6 +383,139 @@ export function stylePreview(style, look) {
         ],
       };
   }
+  if (style === "3d" && look && !["Studio", "Investigation"].includes(look)) {
+    const clay = look === "White clay" || look === "Mechanism studio";
+    scene = clay
+      ? {
+          camera: { x: -0.75, y: 1.8, z: 0.12 },
+          cameraFov: 56,
+          cameraRig: {
+            type: "dolly",
+            target: { x: 1.6, y: 0.95, z: -0.3 },
+            to: { x: -0.5, y: 1.74, z: 0.08 },
+            duration: 8,
+            easing: "smooth",
+          },
+          footnote:
+            "Illustrative narrow-body cockpit · procedural reconstruction",
+          elements: [
+            {
+              id: "cockpit",
+              type: "reconstruction3d",
+              reconstruction: { kind: "cockpit", options: { cutaway: false } },
+            },
+          ],
+        }
+      : look === "Dark map"
+        ? {
+            camera: { x: 70, y: 160, z: 140 },
+            cameraRig: {
+              type: "dolly",
+              target: { x: 0, y: 0, z: 0 },
+              to: { x: 60, y: 150, z: 130 },
+              duration: 8,
+            },
+            footnote: "Natural Earth · schematic geography",
+            elements: [
+              {
+                id: "map",
+                type: "reconstruction3d",
+                reconstruction: {
+                  kind: "worldMap",
+                  options: {
+                    center: [15, 45],
+                    span: [25, 20],
+                    kmPerUnit: 40,
+                    land: "#657180",
+                    seaColor: "#27313e",
+                    border: "#8b99a8",
+                    highlight: { France: "#2f6fdb" },
+                  },
+                },
+              },
+            ],
+          }
+        : {
+            camera: { x: 12, y: 6, z: 16 },
+            cameraRig: {
+              type: "dolly",
+              target: { x: 0, y: 1.2, z: 0 },
+              to: { x: 10, y: 5, z: 14 },
+              duration: 8,
+            },
+            footnote: "Illustrative location · procedural reconstruction",
+            elements: [
+              {
+                id: "ground",
+                type: "box",
+                width: 400,
+                height: 0.2,
+                depth: 400,
+                y: -0.1,
+                fill: "#737e58",
+              },
+              {
+                id: "trees",
+                type: "reconstruction3d",
+                z: -45,
+                reconstruction: {
+                  kind: "forest",
+                  options: {
+                    count: 180,
+                    rMin: 12,
+                    rMax: 40,
+                    height: [7, 13],
+                    palette: "summer",
+                    seed: 6,
+                  },
+                },
+              },
+              {
+                id: "plaza",
+                type: "box",
+                width: 20,
+                height: 0.08,
+                depth: 16,
+                fill: "#b6ae9f",
+              },
+              {
+                id: "canopy",
+                type: "reconstruction3d",
+                z: -3,
+                reconstruction: {
+                  kind: "canopy",
+                  options: {
+                    w: 9,
+                    d: 5,
+                    h: 3,
+                    color: "#d2d3ce",
+                    roofColor: "#e2dcca",
+                  },
+                },
+              },
+              {
+                id: "bench",
+                type: "reconstruction3d",
+                x: 2,
+                reconstruction: { kind: "bench", options: {} },
+              },
+              {
+                id: "car",
+                type: "reconstruction3d",
+                x: -4,
+                z: 4,
+                reconstruction: { kind: "car", options: { color: "#607987" } },
+              },
+              {
+                id: "light",
+                type: "reconstruction3d",
+                x: 6,
+                z: 3,
+                reconstruction: { kind: "lamp", options: { h: 4, on: true } },
+              },
+            ],
+          };
+  }
   return {
     id: "style-preview",
     style,

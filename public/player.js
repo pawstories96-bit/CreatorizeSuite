@@ -4,6 +4,12 @@ import { clone } from "/three-addons/utils/SkeletonUtils.js";
 import { applyCastElement } from "/lib/cast.js";
 import { resolveCamera } from "/lib/cameras.js";
 import { motionAnimator } from "/lib/motion.js";
+import {
+  prepareReconstruction,
+  applyReconstructionLook,
+  reconstructionLook,
+} from "/lib/reconstruction/adapter.js";
+import { drawDocumentaryOverlay } from "/lib/reconstruction/overlay.js";
 import { driveHumanoid } from "/lib/humanoid.js";
 import {
   geometryTypes,
@@ -409,11 +415,28 @@ function build3d(s) {
   );
   camera.position.set(cp.x, cp.y, cp.z);
   camera.lookAt(0, 1, 0);
+  const look = reconstructionLook(project, s.scene);
+  renderer.toneMapping =
+    look?.tone === "agx"
+      ? THREE.AgXToneMapping
+      : look
+        ? THREE.ACESFilmicToneMapping
+        : THREE.NoToneMapping;
+  renderer.toneMappingExposure = look?.exposure || 1;
+  if (look?.fog)
+    world.fog = new THREE.FogExp2(look.fog.color, look.fog.density);
   const lighting = s.scene.lighting;
   world.add(
-    new THREE.HemisphereLight(0xe6f0ff, 0x4b5260, lighting?.ambient ?? 2),
+    new THREE.HemisphereLight(
+      look?.hemi.sky || 0xe6f0ff,
+      look?.hemi.ground || 0x4b5260,
+      lighting?.ambient ?? 2,
+    ),
   );
-  const light = new THREE.DirectionalLight(0xffffff, lighting?.key ?? 3);
+  const light = new THREE.DirectionalLight(
+    look?.sun.color || 0xffffff,
+    lighting?.key ?? 3,
+  );
   const lp = lighting?.position || { x: 8, y: 16, z: 10 };
   light.position.set(lp.x, lp.y, lp.z);
   light.castShadow = true;
@@ -431,7 +454,7 @@ function build3d(s) {
   if (s.scene.environment) {
     const target = s.scene.cameraRig?.target || { x: 0, y: 1, z: 0 };
     const span = Math.max(
-      15,
+      look ? 3 : 15,
       Math.min(
         220,
         Math.hypot(cp.x - target.x, cp.y - target.y, cp.z - target.z) * 0.9,
@@ -701,7 +724,7 @@ function render(t) {
         scale * (e.scale3d?.z ?? 1),
       );
       mixer?.setTime(local);
-      m.userData.animate?.(local);
+      if (!m.userData.animateAfterOpacity) m.userData.animate?.(local);
       m.traverse((o) => {
         for (const material of Array.isArray(o.material)
           ? o.material
@@ -714,6 +737,7 @@ function render(t) {
             material.opacity < 1 || !!material.transmission;
         }
       });
+      if (m.userData.animateAfterOpacity) m.userData.animate?.(local);
     }
     if (renderer && threeCanvas.style.display !== "none") {
       const rig = s.scene.cameraRig;
@@ -771,6 +795,7 @@ function render(t) {
     }
     for (const e of s.scene.elements)
       if (!geometryTypes.includes(e.type)) draw(e, local);
+    drawDocumentaryOverlay(c, s.scene, logicalWidth, logicalHeight, local);
     if (s.scene.label || project.style === "3d") {
       c.fillStyle = "rgba(0,0,0,.6)";
       const label = s.scene.label || "RECONSTRUCTION";
@@ -932,6 +957,14 @@ async function loadProject(p) {
       })),
     };
   }
+  p = {
+    ...p,
+    shots: p.shots.map((s) => ({
+      ...s,
+      scene: s.scene ? applyReconstructionLook(p, s.scene) : s.scene,
+    })),
+  };
+  await prepareReconstruction(p);
   if (p.styleParams?.effects || p.styleParams?.lighting)
     p = {
       ...p,

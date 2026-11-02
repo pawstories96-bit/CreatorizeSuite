@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
-if exist "release\v0.3.2\win-unpacked\Creatorize Suite.exe" (
-  start "" "release\v0.3.2\win-unpacked\Creatorize Suite.exe"
+if exist "release\v0.3.3\win-unpacked\Creatorize Suite.exe" (
+  start "" "release\v0.3.3\win-unpacked\Creatorize Suite.exe"
   exit /b
 )
 if exist "node_modules\electron\dist\electron.exe" (

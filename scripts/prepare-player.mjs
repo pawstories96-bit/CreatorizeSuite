@@ -18,6 +18,7 @@ function copyModule(file) {
   for (const match of source.matchAll(/(?:from\s*|import\s*\()\s*["'](\.[^"']+\.js)["']/g)) copyModule(path.posix.normalize(path.posix.join(path.posix.dirname(file), match[1])));
 }
 for (const file of [
+  "geometries/RoundedBoxGeometry.js",
   "loaders/GLTFLoader.js",
   "loaders/FBXLoader.js",
   "exporters/GLTFExporter.js",

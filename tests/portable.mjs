@@ -12,7 +12,7 @@ await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
 const port = reservation.address().port;
 await new Promise((resolve) => reservation.close(resolve));
 const executable = path.resolve(
-  process.env.PACKAGED_EXE || "release/v0.3.2/Creatorize Suite 0.3.2.exe",
+  process.env.PACKAGED_EXE || "release/v0.3.3/Creatorize Suite 0.3.3.exe",
 );
 const child = spawn(
   executable,
@@ -82,6 +82,7 @@ try {
         method: "POST",
         headers: {
           Origin: base,
+          Connection: "close",
           ...(body instanceof FormData
             ? {}
             : { "Content-Type": "application/json" }),
@@ -117,6 +118,7 @@ try {
     }
     const manifest = {
       ...p,
+      ...(process.env.RECONSTRUCTION_PORTABLE ? { look: "White clay" } : {}),
       characterModels: bodies,
       durationSec: 1,
       cast: { main: { body: "female", finish: "glossy", color: "#bd3653" } },
@@ -133,6 +135,26 @@ try {
               duration: 1,
             },
             elements: [
+              ...(process.env.RECONSTRUCTION_PORTABLE
+                ? [
+                    {
+                      id: "cutaway-room",
+                      type: "reconstruction3d",
+                      reconstruction: {
+                        kind: "room",
+                        options: {
+                          w: 8,
+                          d: 6,
+                          h: 3,
+                          ceiling: false,
+                          open: "front",
+                          wall: "#efeeea",
+                          floor: "#d6d2ca",
+                        },
+                      },
+                    },
+                  ]
+                : []),
               {
                 id: "actor",
                 type: "mannequin",
@@ -171,7 +193,9 @@ try {
       });
     let final;
     for (let i = 0; i < 180; i++) {
-      const state = await fetch(base + "/api/state").then((r) => r.json());
+      const state = await fetch(base + "/api/state", {
+        headers: { Connection: "close" },
+      }).then((r) => r.json());
       final = state.jobs.find((j) => j.id === job.id);
       if (final.status === "error") throw Error(final.error);
       if (final.status === "done") break;
@@ -196,6 +220,7 @@ try {
       passed: true,
       exported,
       size: final.size,
+      reconstructionRoom: !!process.env.RECONSTRUCTION_PORTABLE,
     });
     console.log(
       "PASS: portable imports actual X/Y Bot FBX skins, restores character assets through ZIP, and exports a real two-frame Mixamo MP4",

@@ -4,7 +4,9 @@ One local Windows desktop application for AI video production. First launch is e
 
 ## Run
 
-Double-click `Launch Creatorize.cmd` or `release/v0.3.2/win-unpacked/Creatorize Suite.exe`. The portable output is `release/v0.3.2/Creatorize Suite 0.3.2.exe`. Check PROGRESS.md for packaged verification status. The old launcher forwards to the new one.
+Double-click `Launch Creatorize.cmd` or `release/v0.3.3/win-unpacked/Creatorize Suite.exe`. The portable output is `release/v0.3.3/Creatorize Suite 0.3.3.exe`. Check PROGRESS.md for packaged verification status. The old launcher forwards to the new one.
+
+For the supplied reconstruction toolkit, open a project and choose **Style → Reconstruction look**. White clay, Daylight, Golden hour, Dusk, Night, Overcast, Dark map and Mechanism studio are available. Builds can use detailed aircraft interiors, cutaway rooms, moving coaster trains, forests, maps and sourced evidence cards. Changing a look changes lighting; rebuilding/editing existing shots adds new geometry. See [integration details](docs/reconstruction-toolkit.md).
 
 For development:
 
