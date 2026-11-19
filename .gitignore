@@ -1,19 +1,9 @@
-3D reconstruction/
 node_modules/
+release/
 dist/
 out/
-.next/
-next-env.d.ts
-*.tsbuildinfo
-release/
-.workspace/
-.test-*/
-.test-*.mjs
 test-results/
-*.log
-Creatorize*.png
+.next/
+.test-*
+resources/
 .env
-resources/ffmpeg/*.exe
-resources/browser/
-public/three-addons/
-resources/models/*.exe

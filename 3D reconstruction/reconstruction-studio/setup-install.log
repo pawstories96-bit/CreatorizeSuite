@@ -1,0 +1,172 @@
+
+Reconstruction Studio — environment check
+
+  OK      ffmpeg + ffprobe                                   ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers
+  OK      Node.js >= 18                                      v24.13.0
+  MISSING npm packages (three.js, renderer, maps, fonts)     missing: three, playwright, postprocessing, n8ao, topojson-client, world-atlas, us-atlas, @fontsource/inter, @fontsource/archivo, @fontsource/ibm-plex-mono, @fontsource/source-serif-4
+  MISSING Chromium for Playwright (draws the frames)         
+  MISSING python: numpy (audio)                              
+  MISSING python: scipy (audio filters)                      
+  MISSING python: faster-whisper (timestamps)                
+  MISSING python: requests (ElevenLabs / downloads)          
+  MISSING python: mido + pedalboard (score: MIDI, reverb, mastering) 
+  MISSING SoundFont for the score (instrument samples)       
+  MISSING synth for the score (FluidSynth or TinySoundFont)  
+  MISSING python: pymupdf (optional: PDF document highlights) optional
+  OK      python >= 3.9                                      3.13.7
+
+  Windows AMD64, 12 CPU threads, NVIDIA GPU: NVIDIA GeForce GTX 1650
+
+To fix, run:
+  cd "D:\2D Studio\3D reconstruction\reconstruction-studio" && npm install
+  cd "D:\2D Studio\3D reconstruction\reconstruction-studio" && npx playwright install chromium
+  "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install numpy
+  "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install scipy
+  "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install faster-whisper
+  "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install requests
+  "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" "D:\2D Studio\3D reconstruction\reconstruction-studio\tools\music_setup.py"
+
+>>> cd "D:\2D Studio\3D reconstruction\reconstruction-studio" && npm install
+
+added 13 packages, and audited 14 packages in 57s
+
+found 0 vulnerabilities
+
+>>> cd "D:\2D Studio\3D reconstruction\reconstruction-studio" && npx playwright install chromium
+
+>>> "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install numpy
+Collecting numpy
+  Using cached numpy-2.5.4-cp313-cp313-win_amd64.whl.metadata (6.6 kB)
+Using cached numpy-2.5.4-cp313-cp313-win_amd64.whl (12.6 MB)
+Installing collected packages: numpy
+Successfully installed numpy-2.5.4
+
+[notice] A new release of pip is available: 25.2 -> 26.2.2
+[notice] To update, run: D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+>>> "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install scipy
+Collecting scipy
+  Using cached scipy-1.18.1-cp313-cp313-win_amd64.whl.metadata (61 kB)
+Requirement already satisfied: numpy<2.8,>=2.0.0 in d:\2d studio\3d reconstruction\reconstruction-studio\.venv\lib\site-packages (from scipy) (2.5.4)
+Using cached scipy-1.18.1-cp313-cp313-win_amd64.whl (36.6 MB)
+Installing collected packages: scipy
+Successfully installed scipy-1.18.1
+
+[notice] A new release of pip is available: 25.2 -> 26.2.2
+[notice] To update, run: D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+>>> "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install faster-whisper
+Collecting faster-whisper
+  Using cached faster_whisper-1.2.1-py3-none-any.whl.metadata (16 kB)
+Collecting ctranslate2<5,>=4.0 (from faster-whisper)
+  Using cached ctranslate2-4.8.4-cp313-cp313-win_amd64.whl.metadata (11 kB)
+Collecting huggingface-hub>=0.21 (from faster-whisper)
+  Using cached huggingface_hub-2.3.0-py3-none-any.whl.metadata (16 kB)
+Collecting tokenizers<1,>=0.13 (from faster-whisper)
+  Using cached tokenizers-0.23.3-cp310-abi3-win_amd64.whl.metadata (10 kB)
+Collecting onnxruntime<2,>=1.14 (from faster-whisper)
+  Using cached onnxruntime-1.31.1-cp313-cp313-win_amd64.whl.metadata (6.1 kB)
+Collecting av>=11 (from faster-whisper)
+  Using cached av-19.0.2-cp312-abi3-win_amd64.whl.metadata (5.1 kB)
+Collecting tqdm (from faster-whisper)
+  Using cached tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+Requirement already satisfied: numpy in d:\2d studio\3d reconstruction\reconstruction-studio\.venv\lib\site-packages (from ctranslate2<5,>=4.0->faster-whisper) (2.5.4)
+Collecting pyyaml<7,>=5.3 (from ctranslate2<5,>=4.0->faster-whisper)
+  Using cached pyyaml-6.0.3-cp313-cp313-win_amd64.whl.metadata (2.4 kB)
+Collecting flatbuffers (from onnxruntime<2,>=1.14->faster-whisper)
+  Using cached flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+Collecting packaging (from onnxruntime<2,>=1.14->faster-whisper)
+  Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Collecting protobuf>=4.25.8 (from onnxruntime<2,>=1.14->faster-whisper)
+  Using cached protobuf-7.36.2-cp310-abi3-win_amd64.whl.metadata (595 bytes)
+Collecting click<9.0.0,>=8.4.2 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+Collecting filelock>=3.10.0 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached filelock-4.2.4-py3-none-any.whl.metadata (2.0 kB)
+Collecting fsspec>=2023.5.0 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached fsspec-2026.9.0-py3-none-any.whl.metadata (10 kB)
+Collecting hf-xet<2.0.0,>=1.6.0 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached hf_xet-1.7.0-cp38-abi3-win_amd64.whl.metadata (4.9 kB)
+Collecting httpx2<3,>=2.0.0 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached httpx2-2.16.0-py3-none-any.whl.metadata (10 kB)
+Collecting typing-extensions>=4.1.0 (from huggingface-hub>=0.21->faster-whisper)
+  Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting anyio>=4.10 (from httpx2<3,>=2.0.0->huggingface-hub>=0.21->faster-whisper)
+  Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting httpcore2==2.16.0 (from httpx2<3,>=2.0.0->huggingface-hub>=0.21->faster-whisper)
+  Using cached httpcore2-2.16.0-py3-none-any.whl.metadata (27 kB)
+Collecting idna>=3.18 (from httpx2<3,>=2.0.0->huggingface-hub>=0.21->faster-whisper)
+  Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting truststore>=0.10 (from httpx2<3,>=2.0.0->huggingface-hub>=0.21->faster-whisper)
+  Using cached truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+Collecting h11>=0.16 (from httpcore2==2.16.0->httpx2<3,>=2.0.0->huggingface-hub>=0.21->faster-whisper)
+  Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting colorama (from tqdm->faster-whisper)
+  Using cached colorama-0.4.6-py2.py3-none-any.whl.metadata (17 kB)
+Using cached faster_whisper-1.2.1-py3-none-any.whl (1.1 MB)
+Using cached ctranslate2-4.8.4-cp313-cp313-win_amd64.whl (20.4 MB)
+Using cached onnxruntime-1.31.1-cp313-cp313-win_amd64.whl (14.9 MB)
+Using cached pyyaml-6.0.3-cp313-cp313-win_amd64.whl (154 kB)
+Using cached tokenizers-0.23.3-cp310-abi3-win_amd64.whl (2.9 MB)
+Using cached huggingface_hub-2.3.0-py3-none-any.whl (855 kB)
+Using cached click-8.5.0-py3-none-any.whl (125 kB)
+Using cached hf_xet-1.7.0-cp38-abi3-win_amd64.whl (3.8 MB)
+Using cached httpx2-2.16.0-py3-none-any.whl (97 kB)
+Using cached httpcore2-2.16.0-py3-none-any.whl (85 kB)
+Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+Using cached av-19.0.2-cp312-abi3-win_amd64.whl (28.2 MB)
+Using cached filelock-4.2.4-py3-none-any.whl (162 kB)
+Using cached fsspec-2026.9.0-py3-none-any.whl (221 kB)
+Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+Using cached idna-3.20-py3-none-any.whl (69 kB)
+Using cached packaging-26.3-py3-none-any.whl (129 kB)
+Using cached protobuf-7.36.2-cp310-abi3-win_amd64.whl (456 kB)
+Using cached tqdm-4.70.1-py3-none-any.whl (80 kB)
+Using cached truststore-0.10.5-py3-none-any.whl (19 kB)
+Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+Using cached colorama-0.4.6-py2.py3-none-any.whl (25 kB)
+Using cached flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Installing collected packages: flatbuffers, typing-extensions, truststore, pyyaml, protobuf, packaging, idna, hf-xet, h11, fsspec, filelock, colorama, click, av, tqdm, onnxruntime, httpcore2, ctranslate2, anyio, httpx2, huggingface-hub, tokenizers, faster-whisper
+
+Successfully installed anyio-4.15.1 av-19.0.2 click-8.5.0 colorama-0.4.6 ctranslate2-4.8.4 faster-whisper-1.2.1 filelock-4.2.4 flatbuffers-25.12.19 fsspec-2026.9.0 h11-0.16.0 hf-xet-1.7.0 httpcore2-2.16.0 httpx2-2.16.0 huggingface-hub-2.3.0 idna-3.20 onnxruntime-1.31.1 packaging-26.3 protobuf-7.36.2 pyyaml-6.0.3 tokenizers-0.23.3 tqdm-4.70.1 truststore-0.10.5 typing-extensions-4.16.0
+
+[notice] A new release of pip is available: 25.2 -> 26.2.2
+[notice] To update, run: D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+>>> "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" -m pip install requests
+Collecting requests
+  Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting charset_normalizer<4,>=2 (from requests)
+  Using cached charset_normalizer-3.5.2-cp313-cp313-win_amd64.whl.metadata (47 kB)
+Requirement already satisfied: idna<4,>=2.5 in d:\2d studio\3d reconstruction\reconstruction-studio\.venv\lib\site-packages (from requests) (3.20)
+Collecting urllib3<3,>=1.26 (from requests)
+  Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting certifi>=2023.5.7 (from requests)
+  Using cached certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+Using cached charset_normalizer-3.5.2-cp313-cp313-win_amd64.whl (206 kB)
+Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+Using cached certifi-2026.10.23-py3-none-any.whl (135 kB)
+Installing collected packages: urllib3, charset_normalizer, certifi, requests
+
+Successfully installed certifi-2026.10.23 charset_normalizer-3.5.2 requests-2.34.2 urllib3-2.8.0
+
+[notice] A new release of pip is available: 25.2 -> 26.2.2
+[notice] To update, run: D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+>>> "D:\2D Studio\3D reconstruction\reconstruction-studio\.venv\Scripts\python.exe" "D:\2D Studio\3D reconstruction\reconstruction-studio\tools\music_setup.py"
+
+Film score tools
+
+  OK      python: mido (MIDI score files)                
+  OK      python: pedalboard (reverb, EQ, compression)   
+  OK      python: tinysoundfont (sample synth, fallback) 
+  downloading GeneralUser-GS.sf2 …
+  OK      SoundFont (the instrument samples)             D:\2D Studio\3D reconstruction\reconstruction-studio\soundfonts\GeneralUser-GS.sf2
+  downloading FluidSynth v2.6.1 (fluidsynth-v2.6.1-win10-x64-cpp11.zip) …
+  OK      FluidSynth (the score's renderer)              D:\2D Studio\3D reconstruction\reconstruction-studio\bin\fluidsynth\fluidsynth-v2.6.1-win10-x64-cpp11\bin\fluidsynth.exe
+  OK      test render (8 s of the 'investigation' preset) audition investigation: C:\Users\hardi\AppData\Local\Temp\tmpymwy90rr\test.wav  (fluidsynt
+
+Score tools ready: audio/compose.py can render the music.
+
+Re-run: python tools/doctor.py
